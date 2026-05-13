@@ -5,7 +5,7 @@
 <title>Maze Shooter FPS</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: #000; overflow: hidden; cursor: none; font-family: 'Courier New', monospace; }
+body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
 canvas { display: block; }
 #ui {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -110,6 +110,9 @@ const MOVE_SPEED = 2.5;
 const SPRINT_SPEED = 4.0;
 const ROT_SPEED = 0.003;
 const WALL_HEIGHT = 1.2;
+const PLAYER_RADIUS = 10;
+const ACCELERATION = 20;   // tiles/sec^2
+const DECELERATION = 25;   // tiles/sec^2
 
 // ============ MAP ============
 // 0=empty, 1-4=wall types, 5=exit
@@ -196,6 +199,8 @@ function startGame() {
         x: startX * TILE + TILE / 2,
         y: startY * TILE + TILE / 2,
         angle: 0,
+        vx: 0,
+        vy: 0,
         health: 100,
         maxHealth: 100,
         ammo: 50,
@@ -734,16 +739,20 @@ function updateEnemies(dt) {
             // Chase player
             tryMove(e, angleToPlayer, e.speed, dt);
 
-            // Attack
+            // Attack (with LOS check to prevent wall-through damage)
             if (dist < TILE * 1.5 && e.attackCooldown <= 0) {
-                player.health -= e.damage;
-                e.attackCooldown = 1.0;
-                flashDamage();
-                updateHUD();
+                const wallRay = castRay(angleToPlayer);
+                const distTiles = dist / TILE;
+                if (wallRay.dist > distTiles) {
+                    player.health -= e.damage;
+                    e.attackCooldown = 1.0;
+                    flashDamage();
+                    updateHUD();
 
-                if (player.health <= 0) {
-                    gameState = 'dead';
-                    showOverlay('YOU DIED', `Final Score: ${score}`, 'TRY AGAIN');
+                    if (player.health <= 0) {
+                        gameState = 'dead';
+                        showOverlay('YOU DIED', `Final Score: ${score}`, 'TRY AGAIN');
+                    }
                 }
             }
         }
@@ -762,21 +771,11 @@ function updateEnemies(dt) {
 function tryMove(entity, angle, speed, dt) {
     const newX = entity.x + Math.cos(angle) * speed * dt * TILE;
     const newY = entity.y + Math.sin(angle) * speed * dt * TILE;
-    const radius = 12;
+    const radius = entity.size;
 
-    // Check X movement
-    const mapX = Math.floor(newX / TILE);
-    const mapY = Math.floor(entity.y / TILE);
-    if (MAP[mapY] && MAP[mapY][mapX] === 0) {
-        entity.x = newX;
-    }
-
-    // Check Y movement
-    const mapX2 = Math.floor(entity.x / TILE);
-    const mapY2 = Math.floor(newY / TILE);
-    if (MAP[mapY2] && MAP[mapY2][mapX2] === 0) {
-        entity.y = newY;
-    }
+    const result = resolveCollision(entity.x, entity.y, newX, newY, radius);
+    entity.x = result.x;
+    entity.y = result.y;
 }
 
 // ============ PICKUPS ============
@@ -801,71 +800,131 @@ function updatePickups(dt) {
     }
 }
 
+// ============ COLLISION HELPERS ============
+function isWall(tx, ty) {
+    if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= MAP_H) return true;
+    const tile = MAP[ty][tx];
+    return tile >= 1 && tile <= 4;
+}
+
+function resolveCollision(oldX, oldY, newX, newY, radius) {
+    // Resolve X axis (move X, keep old Y)
+    let finalX = newX;
+    const tileStartY = Math.floor((oldY - radius) / TILE);
+    const tileEndY = Math.floor((oldY + radius) / TILE);
+    for (let ty = tileStartY; ty <= tileEndY; ty++) {
+        const tileStartX = Math.floor((newX - radius) / TILE);
+        const tileEndX = Math.floor((newX + radius) / TILE);
+        for (let tx = tileStartX; tx <= tileEndX; tx++) {
+            if (!isWall(tx, ty)) continue;
+            let cx = Math.max(tx * TILE, Math.min(newX, (tx + 1) * TILE));
+            let cy = Math.max(ty * TILE, Math.min(oldY, (ty + 1) * TILE));
+            let dx = newX - cx, dy = oldY - cy;
+            let dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < radius) {
+                let overlap = radius - dist;
+                if (dist > 0.001) finalX += (dx / dist) * overlap;
+            }
+        }
+    }
+
+    // Resolve Y axis (move Y, use resolved X)
+    let finalY = newY;
+    const tileStartX2 = Math.floor((finalX - radius) / TILE);
+    const tileEndX2 = Math.floor((finalX + radius) / TILE);
+    const tileStartY2 = Math.floor((newY - radius) / TILE);
+    const tileEndY2 = Math.floor((newY + radius) / TILE);
+    for (let ty = tileStartY2; ty <= tileEndY2; ty++) {
+        for (let tx = tileStartX2; tx <= tileEndX2; tx++) {
+            if (!isWall(tx, ty)) continue;
+            let cx = Math.max(tx * TILE, Math.min(finalX, (tx + 1) * TILE));
+            let cy = Math.max(ty * TILE, Math.min(newY, (ty + 1) * TILE));
+            let dx = finalX - cx, dy = newY - cy;
+            let dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < radius) {
+                let overlap = radius - dist;
+                if (dist > 0.001) finalY += (dy / dist) * overlap;
+            }
+        }
+    }
+
+    return { x: finalX, y: finalY };
+}
+
 // ============ PLAYER ============
 function updatePlayer(dt) {
     const sprinting = keys['shift'];
     const speed = sprinting ? SPRINT_SPEED : MOVE_SPEED;
 
-    let moveX = 0, moveY = 0;
+    // Compute desired direction from input
+    let dirX = 0, dirY = 0;
 
     if (keys['w'] || keys['arrowup']) {
-        moveX += Math.cos(player.angle) * speed;
-        moveY += Math.sin(player.angle) * speed;
+        dirX += Math.cos(player.angle);
+        dirY += Math.sin(player.angle);
     }
     if (keys['s'] || keys['arrowdown']) {
-        moveX -= Math.cos(player.angle) * speed;
-        moveY -= Math.sin(player.angle) * speed;
+        dirX -= Math.cos(player.angle);
+        dirY -= Math.sin(player.angle);
     }
     if (keys['a'] || keys['arrowleft']) {
-        moveX += Math.cos(player.angle - Math.PI / 2) * speed;
-        moveY += Math.sin(player.angle - Math.PI / 2) * speed;
+        dirX += Math.cos(player.angle - Math.PI / 2);
+        dirY += Math.sin(player.angle - Math.PI / 2);
     }
     if (keys['d'] || keys['arrowright']) {
-        moveX += Math.cos(player.angle + Math.PI / 2) * speed;
-        moveY += Math.sin(player.angle + Math.PI / 2) * speed;
+        dirX += Math.cos(player.angle + Math.PI / 2);
+        dirY += Math.sin(player.angle + Math.PI / 2);
     }
 
-    // Normalize diagonal movement
-    const len = Math.sqrt(moveX * moveX + moveY * moveY);
-    if (len > 0) {
-        moveX = (moveX / len) * speed;
-        moveY = (moveY / len) * speed;
-    }
+    // Accelerate or decelerate velocity
+    const inputLen = Math.sqrt(dirX * dirX + dirY * dirY);
+    if (inputLen > 0) {
+        dirX /= inputLen;
+        dirY /= inputLen;
 
-    // Apply movement with collision
-    const radius = 10;
-    const newX = player.x + moveX * dt * TILE;
-    const newY = player.y + moveY * dt * TILE;
+        player.vx += dirX * ACCELERATION * dt;
+        player.vy += dirY * ACCELERATION * dt;
 
-    // X collision
-    const mapX = Math.floor(newX / TILE);
-    const mapY = Math.floor(player.y / TILE);
-    if (MAP[mapY] && MAP[mapY][mapX] === 0) {
-        player.x = newX;
-    } else if (MAP[mapY] && MAP[mapY][mapX] === 5) {
-        player.x = newX;
-        // Check if all enemies dead for win
-        if (enemies.length === 0) {
-            gameState = 'win';
-            showOverlay('MAZE CLEARED!', `Score: ${score}`, 'PLAY AGAIN');
+        // Clamp to max speed
+        const spd = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+        if (spd > speed) {
+            player.vx = (player.vx / spd) * speed;
+            player.vy = (player.vy / spd) * speed;
+        }
+    } else {
+        // Decelerate
+        const spd = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+        if (spd > 0) {
+            const decel = DECELERATION * dt;
+            if (spd < decel) {
+                player.vx = 0;
+                player.vy = 0;
+            } else {
+                player.vx = (player.vx / spd) * (spd - decel);
+                player.vy = (player.vy / spd) * (spd - decel);
+            }
         }
     }
 
-    // Y collision
-    const mapX2 = Math.floor(player.x / TILE);
-    const mapY2 = Math.floor(newY / TILE);
-    if (MAP[mapY2] && MAP[mapY2][mapX2] === 0) {
-        player.y = newY;
-    } else if (MAP[mapY2] && MAP[mapY2][mapX2] === 5) {
-        player.y = newY;
-        if (enemies.length === 0) {
-            gameState = 'win';
-            showOverlay('MAZE CLEARED!', `Score: ${score}`, 'PLAY AGAIN');
-        }
+    // Apply velocity with collision (wall sliding)
+    const newX = player.x + player.vx * dt * TILE;
+    const newY = player.y + player.vy * dt * TILE;
+
+    const result = resolveCollision(player.x, player.y, newX, newY, PLAYER_RADIUS);
+    player.x = result.x;
+    player.y = result.y;
+
+    // Check exit tile
+    const tileX = Math.floor(player.x / TILE);
+    const tileY = Math.floor(player.y / TILE);
+    if (tileX >= 0 && tileX < MAP_W && tileY >= 0 && tileY < MAP_H && MAP[tileY][tileX] === 5 && enemies.length === 0) {
+        gameState = 'win';
+        showOverlay('MAZE CLEARED!', `Score: ${score}`, 'PLAY AGAIN');
     }
 
     // Weapon bob
-    if (len > 0) {
+    const currentSpeed = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+    if (currentSpeed > 0.1) {
         weaponBob += dt * (sprinting ? 12 : 8);
     }
 
