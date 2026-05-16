@@ -90,9 +90,9 @@
             // 1. CONFIGURATION & CONSTANTS
             // ==========================================
             const FIXED_DT = 1 / 60;
-            const PLAYER_ACCEL = 15;
-            const PLAYER_DECEL = 10;
-            const PLAYER_MAX_SPEED = 8;
+            const PLAYER_ACCEL = 40;
+            const PLAYER_DECEL = 12;
+            const PLAYER_MAX_SPEED = 15;
             const GRAVITY = -25;
             const JUMP_FORCE = 9;
             const PISTOL_DMG = 15;
@@ -177,7 +177,7 @@
             document.addEventListener("mousemove", (e) => {
                 if (document.pointerLockElement === renderer.domElement) {
                     camera.rotation.y -= e.movementX * 0.002;
-                    camera.rotation.x += e.movementY * 0.002;
+                    camera.rotation.x -= e.movementY * 0.002;
                     camera.rotation.x = Math.max(
                         -Math.PI / 2.1,
                         Math.min(Math.PI / 2.1, camera.rotation.x),
@@ -515,7 +515,7 @@
                 const dir = new THREE.Vector3(
                     input.right,
                     0,
-                    input.forward,
+                    -input.forward,
                 ).applyQuaternion(camera.quaternion);
                 dir.y = 0;
                 dir.normalize();
@@ -525,6 +525,14 @@
                     player.vel.z += dir.z * PLAYER_ACCEL * dt;
                 player.vel.x *= 1 - PLAYER_DECEL * dt;
                 player.vel.z *= 1 - PLAYER_DECEL * dt;
+                // Clamp to max speed
+                const speed2 =
+                    player.vel.x * player.vel.x + player.vel.z * player.vel.z;
+                if (speed2 > PLAYER_MAX_SPEED * PLAYER_MAX_SPEED) {
+                    const scale = PLAYER_MAX_SPEED / Math.sqrt(speed2);
+                    player.vel.x *= scale;
+                    player.vel.z *= scale;
+                }
                 player.vel.y += GRAVITY * dt;
 
                 // Jump
@@ -606,20 +614,15 @@
 
                     const prevPos = e.mesh.position.clone();
                     e.mesh.position.addScaledVector(e.vel, dt);
-                    const hitRadius =
-                        e.mesh.geometry.parameters.radius || 0.4;
+                    const hitRadius = e.mesh.geometry.parameters.radius || 0.4;
                     checkStaticCollision(e.mesh.position, hitRadius);
 
                     // If position was pushed by static collision, bullet/orb hit a wall
-                    const expectedPos = prevPos.clone().addScaledVector(
-                        e.vel,
-                        dt,
-                    );
+                    const expectedPos = prevPos
+                        .clone()
+                        .addScaledVector(e.vel, dt);
                     const correction = e.mesh.position.distanceTo(expectedPos);
-                    if (
-                        e.life !== undefined &&
-                        correction > 0.001
-                    ) {
+                    if (e.life !== undefined && correction > 0.001) {
                         e.active = false;
                         e.mesh.visible = false;
                         return;
@@ -776,8 +779,8 @@
             // 9. INITIALIZATION & MAIN LOOP
             // ==========================================
             // Spawn initial enemies
-            spawnEnemy(new THREE.Vector3(5, 1, -5), 0);
-            spawnEnemy(new THREE.Vector3(-5, 1, -15), 1);
+            spawnEnemy(new THREE.Vector3(5, 1, -15), 0);
+            spawnEnemy(new THREE.Vector3(-5, 1, -18), 1);
             spawnEnemy(new THREE.Vector3(0, 1, 28), 2); // Boss
 
             function loop(time) {
