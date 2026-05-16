@@ -174,14 +174,29 @@
             renderer.domElement.addEventListener("click", () =>
                 renderer.domElement.requestPointerLock(),
             );
+            // FPS-style camera: yaw quaternion + independent pitch to prevent roll
+            const yawQuaternion = new THREE.Quaternion();
+            let pitch = 0;
+            const PITCH_LIMIT = Math.PI / 2.1;
+
             document.addEventListener("mousemove", (e) => {
                 if (document.pointerLockElement === renderer.domElement) {
-                    camera.rotation.y -= e.movementX * 0.002;
-                    camera.rotation.x -= e.movementY * 0.002;
-                    camera.rotation.x = Math.max(
-                        -Math.PI / 2.1,
-                        Math.min(Math.PI / 2.1, camera.rotation.x),
+                    const sensitivity = 0.002;
+                    // Yaw: rotate around world Y axis (no roll)
+                    const yawAngle = -e.movementX * sensitivity;
+                    const yawDelta = new THREE.Quaternion().setFromAxisAngle(
+                        new THREE.Vector3(0, 1, 0),
+                        yawAngle,
                     );
+                    yawQuaternion.premultiply(yawDelta);
+
+                    // Pitch: rotate around camera's local X axis (no roll)
+                    pitch += e.movementY * sensitivity;
+                    pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, pitch));
+
+                    // Apply: yaw (world Y) then pitch (local X)
+                    camera.quaternion.copy(yawQuaternion);
+                    camera.rotateOnAxis(new THREE.Vector3(1, 0, 0), -pitch);
                 }
             });
 

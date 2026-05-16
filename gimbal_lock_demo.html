@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Understanding Gimbal Lock</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0e17;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    overflow-x: hidden;
+  }
+  header {
+    padding: 16px 24px;
+    background: linear-gradient(135deg, #0d1b2a, #1b2838);
+    border-bottom: 1px solid #2a3a4a;
+  }
+  header h1 { font-size: 1.5rem; font-weight: 600; color: #fff; }
+  header p  { font-size: 0.85rem; color: #8899aa; margin-top: 4px; }
+
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 280px;
+    gap: 0;
+    min-height: calc(100vh - 80px);
+  }
+
+  .panel {
+    position: relative;
+    background: #0f1923;
+    border-right: 1px solid #1e2d3d;
+  }
+  .panel:last-child { border-right: none; }
+  .panel-label {
+    position: absolute;
+    top: 12px;
+    left: 16px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #556677;
+    z-index: 10;
+  }
+
+  #gimbal-view { height: 400px; }
+  #camera-view { height: 400px; }
+
+  #info-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  /* Sliders */
+  .controls {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    padding: 20px 32px;
+    background: #0d1520;
+    border-top: 1px solid #1e2d3d;
+  }
+
+  .slider-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .slider-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .slider-header label {
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+  .slider-header .value {
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 0.8rem;
+    color: #6688aa;
+  }
+  .axis-tag {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    margin-right: 6px;
+  }
+  .axis-yaw  { background: #1a3a5c; color: #4499dd; }
+  .axis-pitch { background: #1a4c2a; color: #44cc66; }
+  .axis-roll  { background: #4c1a3a; color: #cc44aa; }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 6px;
+    border-radius: 3px;
+    background: #1a2535;
+    outline: none;
+    cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #3a8adf;
+    border: 2px solid #0a0e17;
+    box-shadow: 0 0 6px rgba(58, 138, 223, 0.5);
+    cursor: pointer;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #3a8adf;
+    border: 2px solid #0a0e17;
+    box-shadow: 0 0 6px rgba(58, 138, 223, 0.5);
+    cursor: pointer;
+  }
+
+  /* Color-coded sliders */
+  .slider-yaw  input::-webkit-slider-thumb { background: #4499dd; box-shadow: 0 0 6px rgba(68,153,221,0.5); }
+  .slider-pitch input::-webkit-slider-thumb { background: #44cc66; box-shadow: 0 0 6px rgba(68,204,102,0.5); }
+  .slider-roll  input::-webkit-slider-thumb { background: #cc44aa; box-shadow: 0 0 6px rgba(204,68,170,0.5); }
+
+  /* Lock warning */
+  .lock-banner {
+    grid-column: 1 / -1;
+    display: none;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 32px;
+    background: #2a1520;
+    border-top: 2px solid #cc3366;
+    color: #ff6699;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+  .lock-banner.active { display: flex; }
+  .lock-banner .icon { font-size: 1.2rem; }
+  .lock-banner .detail { color: #aa6688; font-weight: 400; font-size: 0.8rem; }
+
+  /* Info panel */
+  .info-section {
+    padding: 16px;
+    border-bottom: 1px solid #1a2535;
+  }
+  .info-section h3 {
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #aabbcc;
+  }
+  .info-section p {
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: #778899;
+  }
+  .info-section code {
+    font-family: 'SF Mono', 'Consolas', monospace;
+    background: #151e2a;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.72rem;
+    color: #8899bb;
+  }
+  .math-block {
+    background: #111922;
+    border: 1px solid #1e2d3d;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin: 8px 0;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 0.72rem;
+    color: #8899bb;
+    line-height: 1.6;
+    overflow-x: auto;
+  }
+
+  .matrix-visual {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    margin: 8px 0;
+  }
+  .matrix-cell {
+    text-align: center;
+    padding: 4px;
+    font-size: 0.68rem;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    border-radius: 3px;
+  }
+  .matrix-label { color: #445566; }
+  .matrix-zero { color: #334455; background: #0e1520; }
+  .matrix-active { color: #aabbcc; background: #152030; }
+  .matrix-locked { color: #ff6699; background: #2a1520; }
+
+  .status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #44cc66;
+  }
+  .status-dot.locked { background: #ff4466; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .status-text {
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .status-text.locked { color: #ff4466; }
+  .status-text.free  { color: #44cc66; }
+
+  /* Axis labels on camera view */
+  .camera-axes {
+    position: absolute;
+    bottom: 12px;
+    left: 16px;
+    display: flex;
+    gap: 12px;
+    z-index: 10;
+  }
+  .camera-axis {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+  }
+  .camera-axis .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+  }
+  .cam-x { background: #ff4444; }
+  .cam-y { background: #44cc44; }
+  .cam-z { background: #4488ff; }
+
+  .mode-toggle {
+    margin-top: 12px;
+  }
+  .mode-toggle button {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #2a3a4a;
+    border-radius: 6px;
+    background: #151e2a;
+    color: #8899aa;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .mode-toggle button:hover {
+    background: #1e2d3d;
+    color: #aabbcc;
+  }
+  .mode-toggle button.active {
+    background: #1a3a5c;
+    border-color: #4499dd;
+    color: #4499dd;
+  }
+
+  /* Responsive */
+  @media (max-width: 1100px) {
+    .main-grid {
+      grid-template-columns: 1fr;
+    }
+    .panel { border-right: none; border-bottom: 1px solid #1e2d3d; }
+    #gimbal-view, #camera-view { height: 300px; }
+    .controls { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Gimbal Lock — Interactive Visualization</h1>
+  <p>Rotations have 3 degrees of freedom, but <strong>Euler angle parametrizations</strong> can lose one when two rotation axes align. This is gimbal lock.</p>
+</header>
+
+<div class="main-grid">
+
+  <!-- LEFT: Gimbal mechanism view -->
+  <div class="panel">
+    <div class="panel-label">Nested Gimbals (3D)</div>
+    <div id="gimbal-view"></div>
+  </div>
+
+  <!-- CENTER: Camera view from gimbal -->
+  <div class="panel">
+    <div class="panel-label">Camera Output (Yaw→Pitch→Roll)</div>
+    <div id="camera-view"></div>
+    <div class="camera-axes">
+      <div class="camera-axis"><div class="dot cam-x"></div> X (right)</div>
+      <div class="camera-axis"><div class="dot cam-y"></div> Y (up)</div>
+      <div class="camera-axis"><div class="dot cam-z"></div> Z (forward)</div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Info panel -->
+  <div class="panel">
+    <div class="panel-label">Information</div>
+
+    <div class="info-section">
+      <h3>Current State</h3>
+      <div class="status-indicator">
+        <div class="status-dot free" id="statusDot"></div>
+        <span class="status-text free" id="statusText">Full 3 DOF</span>
+      </div>
+      <div class="matrix-visual" id="matrixVisual"></div>
+    </div>
+
+    <div class="info-section">
+      <h3>What's Happening</h3>
+      <p id="infoText">
+        Move the sliders to see how yaw (Y), pitch (X), and roll (Z) compose.
+        The innermost gimbal carries your camera. When pitch ≈ ±90°, the outer
+        yaw ring and inner roll ring align — you lose a degree of freedom.
+      </p>
+    </div>
+
+    <div class="info-section">
+      <h3>The Math</h3>
+      <p>Euler rotations compose as matrix multiplication. For YXZ order:</p>
+      <div class="math-block">
+        R = R<sub>Y</sub>(ψ) · R<sub>X</sub>(θ) · R<sub>Z</sub>(φ)
+      </div>
+      <p>When θ → ±π/2, the first column of R<sub>X</sub> becomes
+        (0, ±1, 0)ᵀ, causing the Y and Z rotation axes to align.</p>
+      <div class="math-block">
+        R<sub>Y</sub> · R<sub>X</sub>(±π/2) = R<sub>Y</sub> · [axis alignment]<br>
+        → ψ and φ affect the same direction
+      </div>
+    </div>
+
+    <div class="info-section">
+      <h3>The Fix</h3>
+      <p>Quaternions represent rotations without intermediate axes. They maintain 3 DOF everywhere and interpolate smoothly.</p>
+      <div class="math-block">
+        q = q<sub>yaw</sub> ⊗ q<sub>pitch</sub> ⊗ q<sub>roll</sub><br>
+        No intermediate coordinate frame to align
+      </div>
+    </div>
+
+    <div class="mode-toggle">
+      <button id="btnQuaternion" onclick="toggleQuaternion()">
+        Compare: Quaternion Mode
+      </button>
+    </div>
+  </div>
+
+  <!-- LOCK BANNER -->
+  <div class="lock-banner" id="lockBanner">
+    <span class="icon">⚠</span>
+    <span>GIMBAL LOCK — Yaw and Roll axes are collinear. Input degeneracy detected.</span>
+    <span class="detail" id="lockDetail">θ = 90°, the Y and Z rotation axes align</span>
+  </div>
+
+  <!-- SLIDERS -->
+  <div class="controls">
+    <div class="slider-group slider-yaw">
+      <div class="slider-header">
+        <label><span class="axis-tag axis-yaw">Y</span> Yaw (ψ)</label>
+        <span class="value" id="yawVal">0°</span>
+      </div>
+      <input type="range" id="yawSlider" min="-180" max="180" value="0" step="1">
+    </div>
+
+    <div class="slider-group slider-pitch">
+      <div class="slider-header">
+        <label><span class="axis-tag axis-pitch">X</span> Pitch (θ)</label>
+        <span class="value" id="pitchVal">0°</span>
+      </div>
+      <input type="range" id="pitchSlider" min="-90" max="90" value="0" step="1">
+    </div>
+
+    <div class="slider-group slider-roll">
+      <div class="slider-header">
+        <label><span class="axis-tag axis-roll">Z</span> Roll (φ)</label>
+        <span class="value" id="rollVal">0°</span>
+      </div>
+      <input type="range" id="rollSlider" min="-180" max="180" value="0" step="1">
+    </div>
+  </div>
+</div>
+
+<!-- Three.js from CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// =============================================
+// CONFIGURATION
+// =============================================
+const DEG = Math.PI / 180;
+
+// State
+let yawDeg   = 0;
+let pitchDeg = 0;
+let rollDeg  = 0;
+let quaternionMode = false;
+
+// =============================================
+// THREE.JS SETUP — GIMBAL VIEW
+// =============================================
+(function initGimbalView() {
+  const container = document.getElementById('gimbal-view');
+  const scene  = new THREE.Scene();
+  scene.background = new THREE.Color(0x0f1923);
+
+  const camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 100);
+  camera.position.set(4, 3, 5);
+  camera.lookAt(0, 0, 0);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  container.appendChild(renderer.domElement);
+
+  // Lighting
+  scene.add(new THREE.AmbientLight(0x334455, 0.8));
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+  dirLight.position.set(5, 8, 5);
+  scene.add(dirLight);
+  const fillLight = new THREE.DirectionalLight(0x4488cc, 0.3);
+  fillLight.position.set(-5, 2, -3);
+  scene.add(fillLight);
+
+  // Ground plane
+  const grid = new THREE.GridHelper(10, 10, 0x1a2535, 0x1a2535);
+  grid.position.y = -1.5;
+  scene.add(grid);
+
+  // Materials
+  const matYaw   = new THREE.MeshPhongMaterial({ color: 0x4499dd, emissive: 0x113355, shininess: 40, transparent: true, opacity: 0.85 });
+  const matPitch = new THREE.MeshPhongMaterial({ color: 0x44cc66, emissive: 0x115522, shininess: 40, transparent: true, opacity: 0.85 });
+  const matRoll  = new THREE.MeshPhongMaterial({ color: 0xcc44aa, emissive: 0x551133, shininess: 40, transparent: true, opacity: 0.85 });
+  const matAxis  = new THREE.MeshPhongMaterial({ color: 0xff4444, emissive: 0x330000 });
+
+  // Build gimbal mechanism: three nested torus frames
+  // Outer (yaw) — rotates around world Y
+  const gimbalYaw = new THREE.Group();
+  const torusYaw = new THREE.Mesh(
+    new THREE.TorusGeometry(1.2, 0.04, 12, 64),
+    matYaw
+  );
+  gimbalYaw.add(torusYaw);
+  // Cross bars for yaw
+  const barGeo = new THREE.CylinderGeometry(0.02, 0.02, 2.4, 6);
+  const bar1 = new THREE.Mesh(barGeo, matYaw); bar1.rotation.z = Math.PI / 2;
+  const bar2 = new THREE.Mesh(barGeo, matYaw);
+  gimbalYaw.add(bar1, bar2);
+  scene.add(gimbalYaw);
+
+  // Middle (pitch) — rotates around its local X
+  const gimbalPitch = new THREE.Group();
+  const torusPitch = new THREE.Mesh(
+    new THREE.TorusGeometry(0.7, 0.04, 12, 48),
+    matPitch
+  );
+  gimbalPitch.add(torusPitch);
+  const barP = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1.4, 6), matPitch);
+  barP.rotation.z = Math.PI / 2;
+  gimbalPitch.add(barP);
+  gimbalYaw.add(gimbalPitch);
+
+  // Inner (roll) — rotates around its local Z
+  const gimbalRoll = new THREE.Group();
+  const torusRoll = new THREE.Mesh(
+    new THREE.TorusGeometry(0.35, 0.035, 10, 36),
+    matRoll
+  );
+  gimbalRoll.add(torusRoll);
+  gimbalPitch.add(gimbalRoll);
+
+  // Camera indicator (a small cone inside the roll gimbal)
+  const coneGeo = new THREE.ConeGeometry(0.08, 0.25, 8);
+  const camMat = new THREE.MeshPhongMaterial({ color: 0xffffff, emissive: 0x444444 });
+  const cameraCone = new THREE.Mesh(coneGeo, camMat);
+  cameraCone.rotation.x = Math.PI / 2; // point along +Z
+  gimbalRoll.add(cameraCone);
+
+  // Small sphere at center
+  const centerSphere = new THREE.Mesh(
+    new THREE.SphereGeometry(0.06, 12, 12),
+    new THREE.MeshPhongMaterial({ color: 0xffffff })
+  );
+  gimbalYaw.add(centerSphere);
+
+  // Axis arrows (world)
+  function makeArrow(dir, color, pos) {
+    const arrow = new THREE.ArrowHelper(dir, pos || new THREE.Vector3(), 0.6, color, 0.1, 0.05);
+    scene.add(arrow);
+    return arrow;
+  }
+  const arrowX = makeArrow(new THREE.Vector3(1, 0, 0), 0xff4444);
+  const arrowY = makeArrow(new THREE.Vector3(0, 1, 0), 0x44cc44);
+  const arrowZ = makeArrow(new THREE.Vector3(0, 0, 1), 0x4488ff);
+
+  // Animation
+  function animate() {
+    requestAnimationFrame(animate);
+
+    // Apply yaw (world Y)
+    gimbalYaw.rotation.y = yawDeg * DEG;
+
+    // Apply pitch (local X of yaw gimbal)
+    gimbalPitch.rotation.x = pitchDeg * DEG;
+
+    // Apply roll (local Z of pitch gimbal)
+    gimbalRoll.rotation.z = rollDeg * DEG;
+
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  // Store references for later
+  window._gimbalScene = { scene, gimbalYaw, gimbalPitch, gimbalRoll, cameraCone, arrowX, arrowY, arrowZ, renderer };
+})();
+
+// =============================================
+// THREE.JS SETUP — CAMERA VIEW
+// =============================================
+(function initCameraView() {
+  const container = document.getElementById('camera-view');
+  const scene  = new THREE.Scene();
+  scene.background = new THREE.Color(0x1a2233);
+
+  // Fog for depth
+  scene.fog = new THREE.Fog(0x1a2233, 8, 25);
+
+  const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 50);
+  camera.position.set(0, 0, 0);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  container.appendChild(renderer.domElement);
+
+  scene.add(new THREE.AmbientLight(0x556677, 0.6));
+  const sun = new THREE.DirectionalLight(0xffeedd, 0.8);
+  sun.position.set(3, 6, 4);
+  scene.add(sun);
+  const fill = new THREE.DirectionalLight(0x88aacc, 0.3);
+  fill.position.set(-3, 2, -2);
+  scene.add(fill);
+
+  // Ground grid
+  const grid = new THREE.GridHelper(20, 20, 0x2a3a4a, 0x223344);
+  scene.add(grid);
+
+  // A coordinate-cross pattern on the ground (helps see rotation)
+  const crossMat = new THREE.MeshPhongMaterial({ color: 0x334455 });
+  const thickBar = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.01, 8), crossMat);
+  thickBar.rotation.x = -Math.PI / 2;
+  thickBar.position.y = 0.005;
+  scene.add(thickBar);
+  const thickBar2 = thickBar.clone();
+  thickBar2.rotation.z = Math.PI / 2;
+  scene.add(thickBar2);
+
+  // A few reference objects
+  const boxGeo = new THREE.BoxGeometry(0.6, 1.2, 0.6);
+  const pillarMat = new THREE.MeshPhongMaterial({ color: 0x557799, flatShading: true });
+
+  function makePillar(x, z) {
+    const mesh = new THREE.Mesh(boxGeo, pillarMat);
+    mesh.position.set(x, 0.6, z);
+    scene.add(mesh);
+
+    // Top cap
+    const capMat = new THREE.MeshPhongMaterial({ color: 0x88aacc });
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.05, 0.8), capMat);
+    cap.position.set(x, 1.22, z);
+    scene.add(cap);
+  }
+  makePillar(3, 4);
+  makePillar(-3, 3);
+  makePillar(0, -4);
+  makePillar(4, -2);
+  makePillar(-2, -5);
+
+  // A tall vertical cylinder (good for seeing roll)
+  const cylGeo = new THREE.CylinderGeometry(0.15, 0.15, 2, 16);
+  const cylMat = new THREE.MeshPhongMaterial({ color: 0xaa6644 });
+  const pole = new THREE.Mesh(cylGeo, cylMat);
+  pole.position.set(-4, 1, 0);
+  scene.add(pole);
+
+  // Add a stripe on the pole so roll is visible
+  const stripeGeo = new THREE.BoxGeometry(0.02, 1.8, 0.3);
+  const stripeMat = new THREE.MeshPhongMaterial({ color: 0xffee44 });
+  const stripe = new THREE.Mesh(stripeGeo, stripeMat);
+  stripe.position.set(-4, 1, 0);
+  scene.add(stripe);
+
+  function animate() {
+    requestAnimationFrame(animate);
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  window._cameraView = { scene, camera, renderer, stripe, pole };
+})();
+
+// =============================================
+// ROTATION UPDATE
+// =============================================
+function update() {
+  const yaw   = yawDeg   * DEG;
+  const pitch = pitchDeg * DEG;
+  const roll  = rollDeg  * DEG;
+
+  // --- Gimbal view ---
+  const g = window._gimbalScene;
+  g.gimbalYaw.rotation.y   = yaw;
+  g.gimbalPitch.rotation.x = pitch;
+  g.gimbalRoll.rotation.z  = roll;
+
+  // --- Camera view ---
+  const c = window._cameraView;
+
+  if (quaternionMode) {
+    // Quaternion: compose without intermediate frame alignment issues
+    const qY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+    const qX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), pitch);
+    const qZ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), roll);
+    c.camera.quaternion.copy(qY).multiply(qX).multiply(qZ);
+  } else {
+    // Euler: YXZ order (same as gimbal mechanism)
+    c.camera.rotation.set(pitch, yaw, roll, 'YXZ');
+  }
+
+  // Update info panel
+  updateInfo(yaw, pitch, roll);
+}
+
+// =============================================
+// INFO PANEL
+// =============================================
+function updateInfo(yaw, pitch, roll) {
+  // Check gimbal lock
+  const absPitch = Math.abs(Math.abs(pitch) - Math.PI / 2);
+  const isLocked = absPitch < 0.05; // within ~3 degrees
+
+  const statusDot = document.getElementById('statusDot');
+  const statusText = document.getElementById('statusText');
+  const lockBanner = document.getElementById('lockBanner');
+  const lockDetail = document.getElementById('lockDetail');
+  const infoText = document.getElementById('infoText');
+
+  if (isLocked) {
+    statusDot.className = 'status-dot locked';
+    statusText.className = 'status-text locked';
+    statusText.textContent = 'Gimbal Lock!';
+    lockBanner.classList.add('active');
+    const sign = pitch > 0 ? '+' : '−';
+    lockDetail.textContent = `θ ≈ ${sign}90°, Y and Z axes are collinear — yaw and roll control the same axis`;
+
+    if (quaternionMode) {
+      infoText.innerHTML = `<strong style="color:#44cc66">Quaternion mode prevents gimbal lock.</strong> Even at ±90° pitch, yaw and roll remain independent. This is why game engines use quaternions internally.`;
+    } else {
+      infoText.innerHTML = `<strong style="color:#ff4466">Gimbal lock detected.</strong> Move pitch toward ±90°. When locked, trying to "yaw" also rolls the camera — you've lost 1 of 3 degrees of freedom. The rotation axes have aligned.`;
+    }
+  } else {
+    statusDot.className = 'status-dot free';
+    statusText.className = 'status-text free';
+    statusText.textContent = 'Full 3 DOF';
+    lockBanner.classList.remove('active');
+
+    if (quaternionMode) {
+      infoText.innerHTML = `Rotating with <strong>quaternions</strong>. The camera can freely look up, down, and spin around its forward axis independently. No gimbal lock at any orientation.`;
+    } else {
+      const pitchAbs = Math.abs(pitchDeg);
+      if (pitchAbs > 60) {
+        infoText.innerHTML = `Pitch is at <strong>${pitchDeg.toFixed(0)}°</strong> — approaching gimbal lock. When pitch reaches ±90°, the yaw axis and roll axis will align and you'll lose a degree of freedom. Try moving to ±90° to see it lock.`;
+      } else {
+        infoText.innerHTML = `Yaw, pitch, and roll are all <strong>independent</strong>. Try setting pitch to ±90° to see gimbal lock: the outer yaw ring and inner roll ring will align, and both controls will affect the same axis.`;
+      }
+    }
+  }
+
+  // Matrix visualization
+  const mv = document.getElementById('matrixVisual');
+  if (!quaternionMode) {
+    const R = eulerToMatrix3(yaw, pitch, roll, 'YXZ');
+    const vals = [
+      R[0][0], R[0][1], R[0][2], 'x-axis',
+      R[1][0], R[1][1], R[1][2], 'y-axis',
+      R[2][0], R[2][1], R[2][2], 'z-axis',
+    ];
+    let html = '';
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 4; c++) {
+        if (c === 3) {
+          html += `<div class="matrix-cell matrix-label">${vals[r * 4 + c]}</div>`;
+        } else {
+          const v = vals[r * 4 + c];
+          const isZero = Math.abs(v) < 0.01;
+          const isLockedVal = isLocked && (r === 0 && c === 0) || (r === 2 && c === 2) && Math.abs(pitchDeg) > 85;
+          const cls = isZero ? 'matrix-zero' : (isLockedVal ? 'matrix-locked' : 'matrix-active');
+          html += `<div class="matrix-cell ${cls}">${v.toFixed(3)}</div>`;
+        }
+      }
+    }
+    mv.innerHTML = html;
+  } else {
+    mv.innerHTML = '<div class="matrix-cell matrix-active" style="grid-column:1/-1;text-align:center;padding:8px">Quaternion: no matrix singularity<br>3 DOF preserved at all orientations</div>';
+  }
+
+  // Update slider values
+  document.getElementById('yawVal').textContent   = `${yawDeg.toFixed(0)}°`;
+  document.getElementById('pitchVal').textContent = `${pitchDeg.toFixed(0)}°`;
+  document.getElementById('rollVal').textContent  = `${rollDeg.toFixed(0)}°`;
+}
+
+// =============================================
+// HELPER: Euler (YXZ) → 3x3 Matrix
+// =============================================
+function eulerToMatrix3(yaw, pitch, roll, order) {
+  // YXZ: R = Ry(yaw) * Rx(pitch) * Rz(roll)
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cr = Math.cos(roll), sr = Math.sin(roll);
+
+  // Ry
+  const Ry = [
+    [ cy,  0,  sy],
+    [  0,  1,   0],
+    [-sy,  0,  cy]
+  ];
+  // Rx
+  const Rx = [
+    [ 1,   0,   0 ],
+    [ 0,  cp, -sp ],
+    [ 0,  sp,  cp ]
+  ];
+  // Rz
+  const Rz = [
+    [ cr, -sr,  0 ],
+    [ sr,  cr,  0 ],
+    [  0,   0,  1 ]
+  ];
+
+  // R = Ry * Rx
+  const RyRx = [
+    [ Ry[0][0]*Rx[0][0]+Ry[0][1]*Rx[1][0]+Ry[0][2]*Rx[2][0],
+      Ry[0][0]*Rx[0][1]+Ry[0][1]*Rx[1][1]+Ry[0][2]*Rx[2][1],
+      Ry[0][0]*Rx[0][2]+Ry[0][1]*Rx[1][2]+Ry[0][2]*Rx[2][2] ],
+    [ Ry[1][0]*Rx[0][0]+Ry[1][1]*Rx[1][0]+Ry[1][2]*Rx[2][0],
+      Ry[1][0]*Rx[0][1]+Ry[1][1]*Rx[1][1]+Ry[1][2]*Rx[2][1],
+      Ry[1][0]*Rx[0][2]+Ry[1][1]*Rx[1][2]+Ry[1][2]*Rx[2][2] ],
+    [ Ry[2][0]*Rx[0][0]+Ry[2][1]*Rx[1][0]+Ry[2][2]*Rx[2][0],
+      Ry[2][0]*Rx[0][1]+Ry[2][1]*Rx[1][1]+Ry[2][2]*Rx[2][1],
+      Ry[2][0]*Rx[0][2]+Ry[2][1]*Rx[1][2]+Ry[2][2]*Rx[2][2] ]
+  ];
+
+  // R = RyRx * Rz
+  return [
+    [ RyRx[0][0]*Rz[0][0]+RyRx[0][1]*Rz[1][0]+RyRx[0][2]*Rz[2][0],
+      RyRx[0][0]*Rz[0][1]+RyRx[0][1]*Rz[1][1]+RyRx[0][2]*Rz[2][1],
+      RyRx[0][0]*Rz[0][2]+RyRx[0][1]*Rz[1][2]+RyRx[0][2]*Rz[2][2] ],
+    [ RyRx[1][0]*Rz[0][0]+RyRx[1][1]*Rz[1][0]+RyRx[1][2]*Rz[2][0],
+      RyRx[1][0]*Rz[0][1]+RyRx[1][1]*Rz[1][1]+RyRx[1][2]*Rz[2][1],
+      RyRx[1][0]*Rz[0][2]+RyRx[1][1]*Rz[1][2]+RyRx[1][2]*Rz[2][2] ],
+    [ RyRx[2][0]*Rz[0][0]+RyRx[2][1]*Rz[1][0]+RyRx[2][2]*Rz[2][0],
+      RyRx[2][0]*Rz[0][1]+RyRx[2][1]*Rz[1][1]+RyRx[2][2]*Rz[2][1],
+      RyRx[2][0]*Rz[0][2]+RyRx[2][1]*Rz[1][2]+RyRx[2][2]*Rz[2][2] ]
+  ];
+}
+
+// =============================================
+// SLIDER BINDINGS
+// =============================================
+document.getElementById('yawSlider').addEventListener('input', (e) => { yawDeg = +e.target.value; update(); });
+document.getElementById('pitchSlider').addEventListener('input', (e) => { pitchDeg = +e.target.value; update(); });
+document.getElementById('rollSlider').addEventListener('input', (e) => { rollDeg = +e.target.value; update(); });
+
+// =============================================
+// QUATERNION TOGGLE
+// =============================================
+function toggleQuaternion() {
+  quaternionMode = !quaternionMode;
+  const btn = document.getElementById('btnQuaternion');
+  btn.classList.toggle('active', quaternionMode);
+  btn.textContent = quaternionMode
+    ? 'Showing: Quaternion Mode ✓'
+    : 'Compare: Quaternion Mode';
+  update();
+}
+
+// =============================================
+// RESIZE HANDLING
+// =============================================
+window.addEventListener('resize', () => {
+  const gv = document.getElementById('gimbal-view');
+  const cv = document.getElementById('camera-view');
+
+  const g = window._gimbalScene;
+  g.camera.aspect = gv.clientWidth / gv.clientHeight;
+  g.camera.updateProjectionMatrix();
+  g.renderer.setSize(gv.clientWidth, gv.clientHeight);
+
+  const c = window._cameraView;
+  c.camera.aspect = cv.clientWidth / cv.clientHeight;
+  c.camera.updateProjectionMatrix();
+  c.renderer.setSize(cv.clientWidth, cv.clientHeight);
+});
+
+// Initial render
+update();
+</script>
+</body>
+</html>
