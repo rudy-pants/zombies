@@ -1,0 +1,1248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Space FPS — Zombies</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{overflow:hidden;background:#000;font-family:'Courier New',monospace;user-select:none}
+canvas{display:block}
+
+/* ── UI overlays ── */
+.overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.85);z-index:100;color:#0f0;text-align:center}
+.overlay.hidden{display:none}
+.overlay h1{font-size:2.4em;margin-bottom:.3em;text-shadow:0 0 20px #0f0,0 0 40px #080}
+.overlay h2{font-size:1.5em;margin-bottom:.5em;color:#0a0}
+.overlay p{margin:.3em 0;color:#8f8;font-size:.95em;max-width:500px;line-height:1.5}
+.overlay .key{color:#ff0;font-weight:bold}
+.overlay button{margin-top:1.2em;padding:.7em 2em;font-size:1.1em;font-family:inherit;
+  background:transparent;color:#0f0;border:2px solid #0f0;cursor:pointer;transition:.2s}
+.overlay button:hover{background:#0f0;color:#000}
+
+/* ── HUD ── */
+#hud{position:fixed;inset:0;pointer-events:none;z-index:50;display:none}
+#hud.active{display:block}
+#hp-bar-bg{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);width:240px;height:18px;
+  background:rgba(0,0,0,.6);border:1px solid #0a0}
+#hp-bar{height:100%;width:100%;background:linear-gradient(90deg,#0a0,#0f0);transition:width .2s}
+#hp-text{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);font-size:.8em;color:#0f0;
+  width:240px;text-align:center;line-height:18px}
+#weapon-info{position:absolute;bottom:50px;right:20px;color:#0ff;font-size:.85em;text-align:right}
+#ammo-info{position:absolute;bottom:50px;left:20px;color:#ff0;font-size:.85em}
+#enemy-info{position:absolute;top:10px;right:20px;color:#f88;font-size:.85em;text-align:right}
+#charge-wrap{position:absolute;bottom:80px;left:50%;transform:translateX(-50%);width:220px;height:12px;
+  background:rgba(0,0,0,.6);border:1px solid #0ff;display:none}
+#charge-wrap.active{display:block}
+#charge-fill{height:100%;width:0%;background:linear-gradient(90deg,#0ff,#fff);transition:none}
+#charge-label{position:absolute;bottom:94px;left:50%;transform:translateX(-50%);color:#0ff;font-size:.75em}
+
+/* crosshair */
+#crosshair{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:55;display:none}
+#crosshair.active{display:block}
+#crosshair::before,#crosshair::after{content:'';position:absolute;background:rgba(0,255,0,.7)}
+#crosshair::before{width:2px;height:18px;left:50%;top:50%;transform:translate(-50%,-50%)}
+#crosshair::after{height:2px;width:18px;left:50%;top:50%;transform:translate(-50%,-50%)}
+
+/* kill counter */
+#kill-feed{position:absolute;top:10px;left:20px;color:#ff0;font-size:.8em}
+
+/* damage flash */
+#damage-flash{position:fixed;inset:0;background:radial-gradient(ellipse at center,transparent 50%,rgba(255,0,0,.4));
+  pointer-events:none;z-index:45;opacity:0;transition:opacity .1s}
+#damage-flash.show{opacity:1}
+
+/* mini-map */
+#minimap{position:absolute;top:10px;left:50%;transform:translateX(-50%);width:160px;height:120px;
+  border:1px solid #0a0;background:rgba(0,0,0,.5);opacity:.8}
+
+/* pause overlay */
+#pause-msg{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  color:#0a0;font-size:1.2em;display:none;pointer-events:none}
+#pause-msg.show{display:block}
+
+/* zoom effect */
+#zoom-hint{position:absolute;bottom:120px;right:20px;color:#888;font-size:.7em;display:none}
+#zoom-hint.show{display:block}
+</style>
+</head>
+<body>
+
+<!-- ── START SCREEN ── -->
+<div class="overlay" id="start-screen">
+  <h1>🚀 SPACE ZOMBIES</h1>
+  <p>Navigate a derelict space station. Fight through waves of alien creatures. Reach the boss chamber and survive.</p>
+  <p>
+    <span class="key">WASD</span> Move &nbsp;|&nbsp;
+    <span class="key">Mouse</span> Aim &nbsp;|&nbsp;
+    <span class="key">LMB</span> Pistol &nbsp;|&nbsp;
+    <span class="key">RMB</span> Zoom<br/>
+    <span class="key">SPACE</span> Double Jump &nbsp;|&nbsp;
+    <span class="key">Hold F</span> Charge Cannon &nbsp;|&nbsp;
+    <span class="key">Release F</span> Fire &nbsp;|&nbsp;
+    <span class="key">ESC</span> Pause
+  </p>
+  <button id="btn-start">START MISSION</button>
+</div>
+
+<!-- ── PAUSE SCREEN ── -->
+<div class="overlay hidden" id="pause-screen">
+  <h2>⏸ PAUSED</h2>
+  <p>Press <span class="key">ESC</span> or <span class="key">P</span> to resume</p>
+  <button id="btn-resume">RESUME</button>
+</div>
+
+<!-- ── GAME OVER SCREEN ── -->
+<div class="overlay hidden" id="gameover-screen">
+  <h2 style="color:#f00">💀 MISSION FAILED</h2>
+  <p>The station has fallen to the zombies.</p>
+  <p>Kills: <span id="go-kills">0</span></p>
+  <button id="btn-restart">RESTART</button>
+</div>
+
+<!-- ── VICTORY SCREEN ── -->
+<div class="overlay hidden" id="victory-screen">
+  <h1>🎉 STATION SECURED</h1>
+  <p>You defeated the boss and survived the alien outbreak!</p>
+  <p>Kills: <span id="vic-kills">0</span> &nbsp;|&nbsp; Health: <span id="vic-hp">100</span></p>
+  <button id="btn-restart2">PLAY AGAIN</button>
+</div>
+
+<!-- ── HUD ── -->
+<div id="hud">
+  <div id="hp-bar-bg"><div id="hp-bar"></div><div id="hp-text">100 / 100</div></div>
+  <div id="weapon-info">PISTOL<br><span style="font-size:.7em;color:#888">LMB to fire</span></div>
+  <div id="ammo-info">∞ AMMO</div>
+  <div id="enemy-info">Enemies: <span id="enemy-count">0</span><br>Alive: <span id="alive-count">0</span></div>
+  <div id="charge-wrap"><div id="charge-fill"></div></div>
+  <div id="charge-label">PROPULSION CANNON</div>
+  <div id="kill-feed"></div>
+  <div id="crosshair"></div>
+  <div id="zoom-hint">🔍 ZOOMED</div>
+  <div id="pause-msg">PRESS ESC / P TO RESUME</div>
+  <div id="damage-flash"></div>
+</div>
+
+<canvas id="minimap" width="160" height="120"></canvas>
+
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+
+/* ═══════════════════════════════════════════════════════════
+   CONFIGURATION
+   ═══════════════════════════════════════════════════════════ */
+const FIXED_DT = 1/60;
+const PLAYER_ACCEL   = 55;
+const PLAYER_DECEL   = 14;
+const PLAYER_MAX_SPD = 16;
+const GRAVITY        = -28;
+const JUMP_FORCE     = 10.5;
+const DOUBLE_JUMP_FORCE = 9;
+const PISTOL_DMG     = 18;
+const HEADSHOT_MULT  = 3.0;
+const PROP_CHARGE_MS = 3.0;
+const PISTOL_COOLDOWN = 0.18;
+const PLAYER_R       = 0.35;
+const PLAYER_HEIGHT  = 1.7;
+const CAM_HEIGHT     = 0.75;
+
+/* ═══════════════════════════════════════════════════════════
+   THREE.JS SETUP
+   ═══════════════════════════════════════════════════════════ */
+const renderer = new THREE.WebGLRenderer({antialias:true, powerPreference:'high-performance'});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = false;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x04040e);
+scene.fog = new THREE.FogExp2(0x04040e, 0.012);
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 200);
+
+const ambientLight = new THREE.AmbientLight(0x303050, 0.7);
+scene.add(ambientLight);
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+dirLight.position.set(10, 30, 10);
+scene.add(dirLight);
+
+/* ═══════════════════════════════════════════════════════════
+   STATE
+   ═══════════════════════════════════════════════════════════ */
+let gameState = 'menu';  // menu | playing | paused | gameover | victory
+let kills = 0;
+const keys = {};
+
+/* ═══════════════════════════════════════════════════════════
+   YAW/PITCH CAMERA (quaternion + euler pitch, no roll)
+   ═══════════════════════════════════════════════════════════ */
+const yawQ   = new THREE.Quaternion();
+let pitchAngle = 0;
+const PITCH_MAX = Math.PI * 0.48;
+
+function applyCameraRotation(){
+  camera.quaternion.copy(yawQ);
+  camera.rotateOnAxis(new THREE.Vector3(1,0,0), -pitchAngle);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   INPUT
+   ═══════════════════════════════════════════════════════════ */
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if(e.code === 'Space') e.preventDefault();
+  if(gameState === 'playing'){
+    if(e.code === 'Escape' || e.code === 'KeyP') setPause();
+  } else if(gameState === 'paused'){
+    if(e.code === 'Escape' || e.code === 'KeyP') setPause();
+  }
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+const mouse = {x:0, y:0};
+let shootDown = false, zoomDown = false, chargeDown = false;
+let shootConsumed = false;
+
+renderer.domElement.addEventListener('mousedown', e => {
+  if(document.pointerLockElement === renderer.domElement){
+    if(e.button === 0) shootDown = true;
+    if(e.button === 2) zoomDown = true;
+  }
+});
+renderer.domElement.addEventListener('mouseup', e => {
+  if(e.button === 0) shootDown = false;
+  if(e.button === 2) zoomDown = false;
+});
+renderer.domElement.addEventListener('mousemove', e => {
+  if(document.pointerLockElement === renderer.domElement){
+    const sens = 0.002;
+    const yawD = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), -e.movementX*sens);
+    yawQ.premultiply(yawD);
+    pitchAngle += e.movementY * sens;          // positive = look up
+    pitchAngle = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, pitchAngle));
+    applyCameraRotation();
+  }
+});
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+/* ═══════════════════════════════════════════════════════════
+   PLAYER
+   ═══════════════════════════════════════════════════════════ */
+const player = {
+  pos: new THREE.Vector3(0, 1.5, -5),
+  vel: new THREE.Vector3(),
+  onGround: false,
+  jumpsLeft: 2,
+  hp: 100, maxHp: 100,
+  pistolCd: 0,
+};
+
+// Player mesh (small visual reference)
+const playerMesh = new THREE.Group();
+const pBodyGeo = new THREE.CapsuleGeometry(0.3, 1.0, 4, 8);
+const pBodyMat = new THREE.MeshStandardMaterial({color:0x00cc88, roughness:0.4});
+const pBody = new THREE.Mesh(pBodyGeo, pBodyMat);
+pBody.position.y = 0.5;
+playerMesh.add(pBody);
+// visor
+const visorGeo = new THREE.SphereGeometry(0.22, 8, 4, 0, Math.PI*2, 0, Math.PI/2);
+const visorMat = new THREE.MeshStandardMaterial({color:0x00ffff, emissive:0x004444});
+const visor = new THREE.Mesh(visorGeo, visorMat);
+visor.rotation.x = Math.PI;
+visor.position.set(0, 0.95, 0.05);
+playerMesh.add(visor);
+scene.add(playerMesh);
+
+/* ═══════════════════════════════════════════════════════════
+   OBJECT POOLS
+   ═══════════════════════════════════════════════════════════ */
+const MAX_BULLETS = 200;
+const MAX_ORBS    = 12;
+const MAX_ENEMIES = 30;
+const MAX_PARTICLES = 60;
+
+const bullets = Array.from({length:MAX_BULLETS}, () => ({
+  active:false, mesh:null, vel:new THREE.Vector3(), dmg:PISTOL_DMG, life:0
+}));
+const orbs    = Array.from({length:MAX_ORBS},    () => ({
+  active:false, mesh:null, vel:new THREE.Vector3(), mass:2.0, life:0
+}));
+const enemies = Array.from({length:MAX_ENEMIES}, () => ({
+  active:false, type:0, hp:0, maxHp:0, mesh:null, headMesh:null,
+  vel:new THREE.Vector3(), mass:1, speed:4, shootCd:0,
+  patrolTimer:0, patrolTarget:null
+}));
+const particles = Array.from({length:MAX_PARTICLES}, () => ({
+  active:false, mesh:null, vel:new THREE.Vector3(), life:0
+}));
+
+// Bullet geometry & material (shared)
+const bulletGeo = new THREE.SphereGeometry(0.07, 5, 5);
+const bulletMat = new THREE.MeshBasicMaterial({color:0xffff00});
+bullets.forEach(b => { b.mesh = new THREE.Mesh(bulletGeo, bulletMat.clone()); b.mesh.visible=false; scene.add(b.mesh); });
+
+// Orb geometry & material
+const orbGeo = new THREE.SphereGeometry(0.35, 10, 10);
+const orbMat = new THREE.MeshBasicMaterial({color:0x00ffff, transparent:true, opacity:0.85});
+orbs.forEach(o => { o.mesh = new THREE.Mesh(orbGeo, orbMat.clone()); o.mesh.visible=false; scene.add(o.mesh); });
+
+// Enemy geometry
+const enemyBodyGeo = new THREE.BoxGeometry(0.8, 1.6, 0.8);
+const headGeo = new THREE.SphereGeometry(0.25, 8, 6);
+enemies.forEach(e => {
+  e.mesh = new THREE.Mesh(enemyBodyGeo, new THREE.MeshStandardMaterial({color:0xff3333, roughness:0.5}));
+  e.headMesh = new THREE.Mesh(headGeo, new THREE.MeshStandardMaterial({color:0xffaa00, emissive:0x442200}));
+  e.headMesh.position.y = 1.05;
+  e.mesh.add(e.headMesh);
+  e.mesh.visible = false;
+  scene.add(e.mesh);
+});
+
+// Particle geometry
+const partGeo = new THREE.SphereGeometry(0.06, 4, 4);
+particles.forEach(p => {
+  p.mesh = new THREE.Mesh(partGeo, new THREE.MeshBasicMaterial({color:0xff8800}));
+  p.mesh.visible = false;
+  scene.add(p.mesh);
+});
+
+/* ═══════════════════════════════════════════════════════════
+   STATIC COLLIDERS & MAP
+   ═══════════════════════════════════════════════════════════ */
+const staticColliders = [];
+
+function addBox(wx,wy,wz, hwhhdd, color=0x444455){
+  // hwhhdd = {hw, hh, hd, color}
+  const {hw, hh, hd, color:c} = hwhhdd;
+  const geo = new THREE.BoxGeometry(hw*2, hh*2, hd*2);
+  const mat = new THREE.MeshStandardMaterial({color:c, roughness:0.7, metalness:0.1});
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(wx, wy, wz);
+  scene.add(mesh);
+  staticColliders.push({
+    type:'box',
+    min: new THREE.Vector3(wx-hw, wy-hh, wz-hd),
+    max: new THREE.Vector3(wx+hw, wy+hh, wz+hd),
+  });
+}
+
+// ── Floor ──
+const floorGeo = new THREE.PlaneGeometry(60, 60);
+const floorMat = new THREE.MeshStandardMaterial({color:0x1a1a2e, roughness:0.9});
+const floor = new THREE.Mesh(floorGeo, floorMat);
+floor.rotation.x = -Math.PI/2;
+scene.add(floor);
+staticColliders.push({type:'plane', normal:new THREE.Vector3(0,1,0), dist:0});
+
+// ── Room B: z [-10, 0], x [-10, 10] ──
+// Walls: top, bottom, left, right
+addBox(0, 1.5, -10,  {hw:10, hh:1.5, hd:0.4, color:0x556});
+addBox(0, 1.5, 0,    {hw:10, hh:1.5, hd:0.4, color:0x556});
+addBox(-10,1.5, -5,  {hw:0.4, hh:1.5, hd:10, color:0x556});
+addBox(10, 1.5, -5,  {hw:0.4, hh:1.5, hd:10, color:0x556});
+// Door in z=-10 wall (gap between x=-3 and x=3)
+addBox(-7, 1.5, -10, {hw:3, hh:1.5, hd:0.4, color:0x667});
+addBox(7,  1.5, -10, {hw:3, hh:1.5, hd:0.4, color:0x667});
+addBox(-7, 3.0, -10, {hw:3, hh:1.0, hd:0.4, color:0x667});
+addBox(7,  3.0, -10, {hw:3, hh:1.0, hd:0.4, color:0x667});
+
+// ── Room A: z [-20, -10], x [-10, 10] ──
+addBox(0, 1.5, -20,  {hw:10, hh:1.5, hd:0.4, color:0x556});
+addBox(-10,1.5,-15,  {hw:0.4, hh:1.5, hd:10, color:0x556});
+addBox(10, 1.5,-15,  {hw:0.4, hh:1.5, hd:10, color:0x556});
+// Door in z=-20 wall (gap between x=-3 and x=3)
+addBox(-7, 1.5, -20, {hw:3, hh:1.5, hd:0.4, color:0x667});
+addBox(7,  1.5, -20, {hw:3, hh:1.5, hd:0.4, color:0x667});
+addBox(-7, 3.0, -20, {hw:3, hh:1.0, hd:0.4, color:0x667});
+addBox(7,  3.0, -20, {hw:3, hh:1.0, hd:0.4, color:0x667});
+
+// ── Boss Arena: z [25, 33], x [-8, 8] ──
+addBox(0, 1.5, 25,  {hw:8, hh:1.5, hd:0.4, color:0x885522});
+addBox(0, 1.5, 33,  {hw:8, hh:1.5, hd:0.4, color:0x885522});
+addBox(-8,1.5, 29,  {hw:0.4, hh:1.5, hd:8,  color:0x885522});
+addBox(8, 1.5, 29,  {hw:0.4, hh:1.5, hd:8,  color:0x885522});
+// Door from Room B to Boss Arena (gap in z=25 wall)
+addBox(-5, 1.5, 25, {hw:3, hh:1.5, hd:0.4, color:0x996633});
+addBox(5,  1.5, 25, {hw:3, hh:1.5, hd:0.4, color:0x996633});
+addBox(-5, 3.0, 25, {hw:3, hh:1.0, hd:0.4, color:0x996633});
+addBox(5,  3.0, 25, {hw:3, hh:1.0, hd:0.4, color:0x996633});
+
+// ── Corridor connecting Room B → Boss Arena: z [0, 25], x [-3, 3] ──
+addBox(-3, 1.5, 12.5, {hw:0.4, hh:1.5, hd:25, color:0x556});
+addBox(3,  1.5, 12.5, {hw:0.4, hh:1.5, hd:25, color:0x556});
+// Ceiling over corridor (low clearance to add challenge)
+addBox(0, 3.2, 12.5, {hw:3, hh:0.3, hd:25, color:0x334});
+
+// ── Platforms in Room B (elevated, for verticality & double-jump practice) ──
+function addPlatform(wx, wy, wz, hw, hd){
+  addBox(wx, wy, wz, {hw:hw, hh:0.25, hd:hd, color:0x00aacc});
+  // Add a glow line
+  const edgeGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(hw*2, 0.5, hd*2));
+  const edgeMat = new THREE.LineBasicMaterial({color:0x00ffff, transparent:true, opacity:0.3});
+  const edge = new THREE.LineSegments(edgeGeo, edgeMat);
+  edge.position.set(wx, wy, wz);
+  scene.add(edge);
+}
+addPlatform(-5, 3.5, -5,  2.5, 2.5);
+addPlatform(5,  3.5, -5,  2.5, 2.5);
+addPlatform(0,  5.5, -7,  3.0, 2.0);   // higher platform
+addPlatform(-7, 4.5, -2,  2.0, 3.0);
+
+// ── Space station decorations ──
+function addLamp(x, y, z, color=0xffaa44){
+  const lampGeo = new THREE.SphereGeometry(0.15, 6, 6);
+  const lampMat = new THREE.MeshBasicMaterial({color});
+  const lamp = new THREE.Mesh(lampGeo, lampMat);
+  lamp.position.set(x, y, z);
+  scene.add(lamp);
+  const pl = new THREE.PointLight(color, 0.5, 8);
+  pl.position.copy(lamp.position);
+  scene.add(pl);
+}
+// Room B lights
+addLamp(0, 2.9, -5, 0xff4444);
+addLamp(-8, 2.9, -8, 0x44ff44);
+addLamp(8,  2.9, -8, 0x44ff44);
+addLamp(-8, 2.9, -2, 0x4444ff);
+addLamp(8,  2.9, -2, 0x4444ff);
+// Room A lights
+addLamp(0, 2.9, -15, 0xff8844);
+addLamp(-7, 2.9, -17, 0x88ff44);
+addLamp(7,  2.9, -17, 0xff4488);
+// Corridor lights
+addLamp(0, 3.0, 5, 0xffff44);
+addLamp(0, 3.0, 15, 0xffff44);
+// Boss arena lights
+addLamp(0, 2.9, 29, 0xff00ff);
+
+/* ═══════════════════════════════════════════════════════════
+   COLLISION HELPERS
+   ═══════════════════════════════════════════════════════════ */
+function sphereBoxHit(spos, sr, bmin, bmax){
+  let cx = Math.max(bmin.x, Math.min(spos.x, bmax.x));
+  let cy = Math.max(bmin.y, Math.min(spos.y, bmax.y));
+  let cz = Math.max(bmin.z, Math.min(spos.z, bmax.z));
+  const dx=spos.x-cx, dy=spos.y-cy, dz=spos.z-cz;
+  return dx*dx+dy*dy+dz*dz <= sr*sr;
+}
+
+// Resolves collision with all static colliders, sliding along walls.
+// Modifies pos and vel in-place. Sets vel.y to 0 when player lands on ground.
+function slideCollision(pos, vel, radius){
+  // 1) Handle ground plane (y=0) — this catches the floor for everyone
+  if(pos.y - radius < 0){
+    pos.y = radius;
+    vel.y = 0;
+    return;
+  }
+
+  // 2) Handle any ceiling planes (y < 0 normal — pushing player down)
+  for(const c of staticColliders){
+    if(c.type === 'plane' && c.normal.y < -0.9){
+      if(pos.y + radius < c.dist){
+        pos.y = c.dist - radius;
+        vel.y = 0;
+        return;
+      }
+    }
+  }
+
+  // 3) Check all box colliders — resolve the first (closest-axis) hit
+  for(const c of staticColliders){
+    if(c.type !== 'box') continue;
+    if(!sphereBoxHit(pos, radius, c.min, c.max)) continue;
+
+    // Compute penetration depth on each axis independently
+    const cx = (c.min.x + c.max.x) / 2;
+    const cy = (c.min.y + c.max.y) / 2;
+    const cz = (c.min.z + c.max.z) / 2;
+    const hw = (c.max.x - c.min.x) / 2;
+    const hh = (c.max.y - c.min.y) / 2;
+    const hd = (c.max.z - c.min.z) / 2;
+
+    // Distance from player center to each face; negative = inside that face
+    const oxX = (pos.x > cx) ? (pos.x - (cx + hw)) : ((cx - hw) - pos.x);
+    const oxY = (pos.y > cy) ? (pos.y - (cy + hh)) : ((cy - hh) - pos.y);
+    const oxZ = (pos.z > cz) ? (pos.z - (cz + hd)) : ((cz - hd) - pos.z);
+
+    // Resolve on axis with smallest penetration
+    const absOX = Math.abs(oxX), absOY = Math.abs(oxY), absOZ = Math.abs(oxZ);
+
+    if(absOX <= absOY && absOX <= absOZ){
+      pos.x = (oxX > 0) ? c.max.x + radius : c.min.x - radius;
+      vel.x = 0;
+    } else if(absOY <= absOZ){
+      if(oxY > 0){
+        // Player above box → land on top
+        pos.y = c.max.y + radius;
+        vel.y = 0;
+      } else {
+        // Player below box → push out bottom
+        pos.y = c.min.y - radius;
+      }
+    } else {
+      pos.z = (oxZ > 0) ? c.max.z + radius : c.min.z - radius;
+      vel.z = 0;
+    }
+    return;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SPAWN HELPERS
+   ═══════════════════════════════════════════════════════════ */
+function spawnBullet(pos, dir, dmg=PISTOL_DMG, fromEnemy=false){
+  for(const b of bullets){
+    if(!b.active){
+      b.active = true;
+      b.mesh.visible = true;
+      b.mesh.position.copy(pos);
+      b.mesh.position.addScaledVector(dir, 0.5);
+      b.vel.copy(dir).multiplyScalar(55);
+      b.dmg = dmg;
+      b.life = 3.0;
+      if(fromEnemy){
+        b.mesh.material.color.setHex(0xff2222);
+      } else {
+        b.mesh.material.color.setHex(0xffff00);
+      }
+      return b;
+    }
+  }
+  return null;
+}
+
+function spawnOrb(pos, dir){
+  for(const o of orbs){
+    if(!o.active){
+      o.active = true;
+      o.mesh.visible = true;
+      o.mesh.position.copy(pos);
+      o.vel.copy(dir).multiplyScalar(14);
+      o.mass = 2.0;
+      o.life = 5.0;
+      // Add point light to orb
+      const orbLight = new THREE.PointLight(0x00ffff, 1, 6);
+      o.mesh.add(orbLight);
+      o.light = orbLight;
+      return o;
+    }
+  }
+  return null;
+}
+
+function spawnEnemy(pos, type){
+  for(const e of enemies){
+    if(!e.active){
+      e.active = true;
+      e.mesh.visible = true;
+      e.mesh.position.copy(pos);
+      e.vel.set(0,0,0);
+      e.type = type;
+      e.shootCd = 2 + Math.random()*2;
+      e.patrolTimer = 0;
+      e.patrolTarget = null;
+
+      if(type === 0){ // Crawler – small, fast, half-scale
+        e.hp = 30; e.maxHp = 30;
+        e.mesh.scale.set(0.45, 0.45, 0.45);
+        e.headMesh.position.y = 0.55;
+        e.mass = 0.5; e.speed = 7;
+        e.mesh.material.color.setHex(0x888888);
+        e.mesh.material.emissive.setHex(0x220000);
+        e.headMesh.material.color.setHex(0xaa6644);
+        // Crawler stays lower to ground
+        e.mesh.position.y = 0.5;
+      } else if(type === 1){ // Shooter – player-sized, fires back
+        e.hp = 60; e.maxHp = 60;
+        e.mesh.scale.set(0.9, 0.9, 0.9);
+        e.mass = 0.85; e.speed = 4.5;
+        e.mesh.material.color.setHex(0xff4444);
+        e.mesh.material.emissive.setHex(0x330000);
+        e.headMesh.material.color.setHex(0xff8844);
+        e.mesh.position.y = 1.0;
+      } else if(type === 2){ // Boss
+        e.hp = 600; e.maxHp = 600;
+        e.mesh.scale.set(2.0, 2.0, 2.0);
+        e.headMesh.scale.set(1.3, 1.3, 1.3);
+        e.headMesh.position.y = 1.3;
+        e.mass = 2.0; e.speed = 1.8;
+        e.mesh.material.color.setHex(0xcc00cc);
+        e.mesh.material.emissive.setHex(0x220022);
+        e.headMesh.material.color.setHex(0xff44ff);
+        e.shootCd = 0;
+        // Boss has a health bar above head
+        const bossLight = new THREE.PointLight(0xff00ff, 1.5, 12);
+        e.mesh.add(bossLight);
+        e.mesh.position.y = 1.5;
+      }
+
+      return e;
+    }
+  }
+  return null;
+}
+
+function spawnParticle(pos, color=0xff8800){
+  for(const p of particles){
+    if(!p.active){
+      p.active = true;
+      p.mesh.visible = true;
+      p.mesh.position.copy(pos);
+      p.vel.set((Math.random()-0.5)*4, Math.random()*3, (Math.random()-0.5)*4);
+      p.life = 0.4 + Math.random()*0.3;
+      p.mesh.material.color.setHex(color);
+      return p;
+    }
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   ENEMY SPAWNING (level design)
+   ═══════════════════════════════════════════════════════════ */
+function spawnEnemies(){
+  // Room A: 3 crawlers + 2 shooters
+  spawnEnemy(new THREE.Vector3(4, 0.5, -14), 0);
+  spawnEnemy(new THREE.Vector3(-4, 0.5, -16), 0);
+  spawnEnemy(new THREE.Vector3(6, 0.5, -17), 0);
+  spawnEnemy(new THREE.Vector3(-5, 1.0, -18), 1);
+  spawnEnemy(new THREE.Vector3(3, 1.0, -19), 1);
+
+  // Room B: 2 crawlers
+  spawnEnemy(new THREE.Vector3(-6, 0.5, -8), 0);
+  spawnEnemy(new THREE.Vector3(7, 0.5, -3), 0);
+
+  // Corridor: 1 shooter
+  spawnEnemy(new THREE.Vector3(0, 1.0, 10), 1);
+
+  // Boss arena: BOSS
+  spawnEnemy(new THREE.Vector3(0, 1.5, 29), 2);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   GAME STATE MANAGEMENT
+   ═══════════════════════════════════════════════════════════ */
+const startScreen   = document.getElementById('start-screen');
+const pauseScreen   = document.getElementById('pause-screen');
+const gameoverScreen= document.getElementById('gameover-screen');
+const victoryScreen = document.getElementById('victory-screen');
+const hudEl         = document.getElementById('hud');
+const crosshairEl   = document.getElementById('crosshair');
+const pauseMsgEl    = document.getElementById('pause-msg');
+const hpBarEl       = document.getElementById('hp-bar');
+const hpTextEl      = document.getElementById('hp-text');
+const enemyCountEl  = document.getElementById('enemy-count');
+const aliveCountEl  = document.getElementById('alive-count');
+const chargeWrapEl  = document.getElementById('charge-wrap');
+const chargeFillEl  = document.getElementById('charge-fill');
+const damageFlashEl = document.getElementById('damage-flash');
+const weaponInfoEl  = document.getElementById('weapon-info');
+const killFeedEl    = document.getElementById('kill-feed');
+const zoomHintEl    = document.getElementById('zoom-hint');
+
+function resetGame(){
+  kills = 0;
+  player.pos.set(0, 1.5, -5);
+  player.vel.set(0,0,0);
+  player.onGround = false;
+  player.jumpsLeft = 2;
+  player.hp = player.maxHp;
+  player.pistolCd = 0;
+  yawQ.set(0,0,0,1);
+  pitchAngle = 0;
+  applyCameraRotation();
+
+  // Deactivate all pooled entities
+  bullets.forEach(b => { b.active=false; b.mesh.visible=false; });
+  orbs.forEach(o   => { o.active=false; o.mesh.visible=false; });
+  enemies.forEach(e => { e.active=false; e.mesh.visible=false; });
+  particles.forEach(p => { p.active=false; p.mesh.visible=false; });
+
+  spawnEnemies();
+}
+
+function showScreen(el){
+  startScreen.classList.add('hidden');
+  pauseScreen.classList.add('hidden');
+  gameoverScreen.classList.add('hidden');
+  victoryScreen.classList.add('hidden');
+  hudEl.classList.remove('active');
+  crosshairEl.classList.remove('active');
+  pauseMsgEl.classList.remove('show');
+  zoomHintEl.classList.remove('show');
+  if(el){ el.classList.remove('hidden'); }
+}
+
+function setGameplay(){
+  if(gameState === 'menu') resetGame();
+  gameState = 'playing';
+  renderer.domElement.requestPointerLock();
+  showScreen(null);
+  hudEl.classList.add('active');
+  crosshairEl.classList.add('active');
+}
+
+function setPause(){
+  if(gameState === 'playing'){
+    gameState = 'paused';
+    document.exitPointerLock();
+    pauseScreen.classList.remove('hidden');
+    pauseMsgEl.classList.remove('show');
+  } else if(gameState === 'paused'){
+    gameState = 'playing';
+    renderer.domElement.requestPointerLock();
+    pauseScreen.classList.add('hidden');
+  }
+}
+
+function gameOver(){
+  gameState = 'gameover';
+  document.exitPointerLock();
+  document.getElementById('go-kills').textContent = kills;
+  showScreen(gameoverScreen);
+}
+
+function victory(){
+  gameState = 'victory';
+  document.exitPointerLock();
+  document.getElementById('vic-kills').textContent = kills;
+  document.getElementById('vic-hp').textContent = Math.max(0, Math.floor(player.hp));
+  showScreen(victoryScreen);
+}
+
+/* Button handlers */
+document.getElementById('btn-start').addEventListener('click', setGameplay);
+document.getElementById('btn-resume').addEventListener('click', setPause);
+document.getElementById('btn-restart').addEventListener('click', () => { resetGame(); setGameplay(); });
+document.getElementById('btn-restart2').addEventListener('click', () => { resetGame(); setGameplay(); });
+
+// Click to re-lock pointer during gameplay
+renderer.domElement.addEventListener('click', () => {
+  if(gameState === 'playing' && document.pointerLockElement !== renderer.domElement){
+    renderer.domElement.requestPointerLock();
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════
+   UPDATE
+   ═══════════════════════════════════════════════════════════ */
+let chargeTime = 0;
+let isCharging = false;
+let zoomed = false;
+let bossDead = false;
+let bossSpawned = false;
+let corridorEnemiesAlive = 0;
+
+function update(dt){
+  // ── Player Movement ──
+  const forward = new THREE.Vector3(0,0,-1).applyQuaternion(yawQ);
+  forward.y = 0; forward.normalize();
+  const right = new THREE.Vector3(1,0,0).applyQuaternion(yawQ);
+  right.y = 0; right.normalize();
+
+  let moveX = 0, moveZ = 0;
+  if(keys['KeyW']) moveZ -= 1;
+  if(keys['KeyS']) moveZ += 1;
+  if(keys['KeyA']) moveX -= 1;
+  if(keys['KeyD']) moveX += 1;
+
+  const targetVel = new THREE.Vector3();
+  if(moveX || moveZ){
+    targetVel.addScaledVector(forward, -moveZ);
+    targetVel.addScaledVector(right, moveX);
+    targetVel.normalize().multiplyScalar(PLAYER_MAX_SPD);
+  }
+
+  // Smooth acceleration/deceleration
+  const accelRate = PLAYER_ACCEL;
+  const decelRate = PLAYER_DECEL;
+  if(targetVel.lengthSq() > 0){
+    player.vel.x += (targetVel.x - player.vel.x) * Math.min(accelRate * dt, 1);
+    player.vel.z += (targetVel.z - player.vel.z) * Math.min(accelRate * dt, 1);
+  } else {
+    player.vel.x *= Math.pow(1 - decelRate * dt, 1);
+    player.vel.z *= Math.pow(1 - decelRate * dt, 1);
+    if(Math.abs(player.vel.x) < 0.1) player.vel.x = 0;
+    if(Math.abs(player.vel.z) < 0.1) player.vel.z = 0;
+  }
+
+  // Clamp
+  const spd2 = player.vel.x*player.vel.x + player.vel.z*player.vel.z;
+  if(spd2 > PLAYER_MAX_SPD*PLAYER_MAX_SPD){
+    const s = PLAYER_MAX_SPD / Math.sqrt(spd2);
+    player.vel.x *= s; player.vel.z *= s;
+  }
+
+  // Gravity
+  player.vel.y += GRAVITY * dt;
+
+  // Jump
+  const wantJump = keys['Space'];
+  if(wantJump && !player._jumpHeld){
+    player._jumpHeld = true;
+    if(player.onGround){
+      player.vel.y = JUMP_FORCE;
+      player.onGround = false;
+      player.jumpsLeft = 1;
+    } else if(player.jumpsLeft > 0){
+      player.vel.y = DOUBLE_JUMP_FORCE;
+      player.jumpsLeft--;
+    }
+  }
+  if(!wantJump) player._jumpHeld = false;
+
+  // Apply velocity
+  player.pos.x += player.vel.x * dt;
+  player.pos.y += player.vel.y * dt;
+  player.pos.z += player.vel.z * dt;
+
+  // Static collision (slides on walls, lands on floors/platforms)
+  slideCollision(player.pos, player.vel, PLAYER_R, dt);
+
+  // Ground detection: onGround = vel.y == 0 and pos is not falling through
+  // We determine onGround from vel.y after slideCollision already zeroed it
+  player.onGround = (player.vel.y <= 0.01 && player.vel.y >= -0.01);
+  if(player.onGround){
+    player.jumpsLeft = 2;
+  }
+
+  // Update player mesh position
+  playerMesh.position.copy(player.pos);
+  // Face movement direction
+  if(Math.abs(player.vel.x) > 0.5 || Math.abs(player.vel.z) > 0.5){
+    const angle = Math.atan2(player.vel.x, player.vel.z);
+    playerMesh.rotation.y = angle;
+  }
+
+  // Camera
+  camera.position.set(player.pos.x, player.pos.y + CAM_HEIGHT, player.pos.z);
+  applyCameraRotation();
+
+  // Zoom
+  const targetZoom = zoomed ? 35 : 70;
+  camera.fov += (targetZoom - camera.fov) * Math.min(dt * 8, 1);
+  camera.updateProjectionMatrix();
+  zoomHintEl.classList.toggle('show', zoomed);
+
+  // Pistol shooting
+  player.pistolCd -= dt;
+  if(shootDown && !shootConsumed && player.pistolCd <= 0){
+    player.pistolCd = PISTOL_COOLDOWN;
+    shootConsumed = true;
+    // Raycast direction from camera forward
+    const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+    spawnBullet(camera.position.clone(), fwd);
+  }
+  if(!shootDown) shootConsumed = false;
+
+  // Propulsion Cannon (charge/release)
+  if(keys['KeyF'] && !isCharging){
+    isCharging = true;
+    chargeTime = 0;
+  }
+  if(!keys['KeyF'] && isCharging){
+    isCharging = false;
+    if(chargeTime >= PROP_CHARGE_MS){
+      // Fully charged – fire orb
+      const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+      spawnOrb(camera.position.clone(), fwd);
+      chargeTime = 0;
+    } else {
+      chargeTime = 0;
+    }
+  }
+  if(isCharging){
+    chargeTime += dt;
+  }
+  const chargePct = isCharging ? Math.min(chargeTime / PROP_CHARGE_MS * 100, 100) : 0;
+  chargeWrapEl.classList.toggle('active', isCharging || chargeTime > 0);
+  chargeFillEl.style.width = chargePct + '%';
+  chargeFillEl.style.background = chargePct >= 100
+    ? 'linear-gradient(90deg, #fff, #0ff)'
+    : 'linear-gradient(90deg, #0ff, #fff)';
+  weaponInfoEl.innerHTML = isCharging && chargePct < 100
+    ? `CHARGING<br><span style="font-size:.7em;color:#0ff">${(chargeTime).toFixed(1)}s / ${PROP_CHARGE_MS}s</span>`
+    : (chargePct >= 100
+      ? `READY!<br><span style="font-size:.7em;color:#fff">F to fire</span>`
+      : 'PISTOL<br><span style="font-size:.7em;color:#888">LMB to fire</span>');
+
+  // ── Update Bullets ──
+  for(const b of bullets){
+    if(!b.active) continue;
+    b.life -= dt;
+    if(b.life <= 0){ b.active=false; b.mesh.visible=false; continue; }
+
+    const prevPos = b.mesh.position.clone();
+    b.mesh.position.addScaledVector(b.vel, dt);
+
+    // Check static collision (wall hit)
+    let wallHit = false;
+    for(const c of staticColliders){
+      if(c.type === 'plane' && c.normal.y > 0.9){
+        if(b.mesh.position.y < c.dist + 0.05){ wallHit=true; break; }
+      } else if(c.type === 'box'){
+        if(sphereBoxHit(b.mesh.position, 0.08, c.min, c.max)){ wallHit=true; break; }
+      }
+    }
+
+    if(wallHit){
+      b.active = false; b.mesh.visible = false;
+      // Spawn spark particles
+      for(let i=0; i<3; i++) spawnParticle(b.mesh.position.clone(), b.mesh.material.color.getHex());
+      continue;
+    }
+
+    // Bullet vs enemies (only if from player)
+    if(!b.mesh.material.color.equals(new THREE.Color(0xff2222))){
+      for(const e of enemies){
+        if(!e.active) continue;
+        // Headshot check
+        const headWorldPos = e.headMesh.position.clone().add(e.mesh.position);
+        if(b.mesh.position.distanceTo(headWorldPos) < 0.3){
+          e.hp -= b.dmg * HEADSHOT_MULT;
+          b.active = false; b.mesh.visible = false;
+          e.headMesh.material.emissive.setHex(0xffffff);
+          setTimeout(()=>{ if(e.headMesh) e.headMesh.material.emissive.setHex(0x442200); }, 80);
+          spawnParticle(headWorldPos, 0xff4444);
+          addKillFeed('HEADSHOT!');
+          continue;
+        }
+        // Body hit
+        if(b.mesh.position.distanceTo(e.mesh.position) < 0.5){
+          e.hp -= b.dmg;
+          b.active = false; b.mesh.visible = false;
+          spawnParticle(b.mesh.position.clone(), 0xff4400);
+          addKillFeed('Hit enemy!');
+          continue;
+        }
+      }
+    }
+  }
+
+  // ── Update Orbs ──
+  for(const o of orbs){
+    if(!o.active) continue;
+    o.life -= dt;
+    if(o.life <= 0){ o.active=false; o.mesh.visible=false; continue; }
+
+    const prevPos = o.mesh.position.clone();
+    o.mesh.position.addScaledVector(o.vel, dt);
+
+    // Gravity on orbs (lighter effect)
+    o.vel.y += GRAVITY * 0.3 * dt;
+
+    // Check static collision
+    let wallHit = false;
+    for(const c of staticColliders){
+      if(c.type === 'plane' && c.normal.y > 0.9){
+        if(o.mesh.position.y < c.dist + 0.05){ wallHit=true; break; }
+      } else if(c.type === 'box'){
+        if(sphereBoxHit(o.mesh.position, 0.35, c.min, c.max)){ wallHit=true; break; }
+      }
+    }
+
+    if(wallHit){
+      o.active = false; o.mesh.visible = false;
+      // Big explosion particles
+      for(let i=0; i<8; i++) spawnParticle(o.mesh.position.clone(), 0x00ffff);
+      continue;
+    }
+
+    // Orb vs enemies (push them!)
+    for(const e of enemies){
+      if(!e.active) continue;
+      const dist = o.mesh.position.distanceTo(e.mesh.position);
+      const minDist = 0.35 + (e.mesh.geometry.parameters.height || 1.6) * e.mesh.scale.y * 0.5;
+      if(dist < minDist && dist > 0.01){
+        // Transfer momentum
+        const impulse = o.vel.clone().multiplyScalar(o.mass / e.mass * 0.8);
+        e.vel.add(impulse);
+        e.hp -= 20; // Orb does damage too
+        spawnParticle(o.mesh.position.clone(), 0x00ffff);
+
+        // Push nearby player
+        if(player.pos.distanceTo(e.mesh.position) < 2.5){
+          const push = e.vel.clone().multiplyScalar(0.3);
+          player.vel.add(push);
+        }
+
+        o.active = false; o.mesh.visible = false;
+        addKillFeed('Orb hit!');
+        break;
+      }
+    }
+  }
+
+  // ── Enemy AI & Updates ──
+  for(const e of enemies){
+    if(!e.active) continue;
+
+    const distToPlayer = e.mesh.position.distanceTo(player.pos);
+    e.shootCd -= dt;
+
+    // Despawn if too far
+    if(distToPlayer > 50){
+      e.active = false; e.mesh.visible = false;
+      continue;
+    }
+
+    // ── Movement AI ──
+    if(distToPlayer < 20){
+      // Chase player
+      const dir = player.pos.clone().sub(e.mesh.position);
+      dir.y = 0; dir.normalize();
+
+      // Adjust velocity toward target
+      const targetSpeed = e.speed;
+      e.vel.x += (dir.x * targetSpeed - e.vel.x) * Math.min(dt * 3, 1);
+      e.vel.z += (dir.z * targetSpeed - e.vel.z) * Math.min(dt * 3, 1);
+
+      // Apply ground movement
+      e.vel.y += GRAVITY * dt;
+      e.mesh.position.x += e.vel.x * dt;
+      e.mesh.position.y += e.vel.y * dt;
+      e.mesh.position.z += e.vel.z * dt;
+
+      // Enemy static collision
+      const eR = 0.35 * e.mesh.scale.x;
+      slideCollision(e.mesh.position, e.vel, eR, dt);
+
+      // Keep above ground
+      if(e.mesh.position.y < e.vel.y < 0.5){
+        e.mesh.position.y = Math.max(e.mesh.position.y, 0.5);
+        e.vel.y = 0;
+      }
+
+      // Look at player
+      e.mesh.lookAt(player.pos.x, e.mesh.position.y, player.pos.z);
+
+    } else {
+      // Patrol (wander randomly)
+      e.patrolTimer -= dt;
+      if(e.patrolTimer <= 0){
+        e.patrolTimer = 2 + Math.random() * 3;
+        const angle = Math.random() * Math.PI * 2;
+        e.patrolTarget = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle)).multiplyScalar(e.speed * 0.5);
+      }
+      if(e.patrolTarget){
+        e.vel.lerp(e.patrolTarget, dt * 2);
+        e.vel.y += GRAVITY * dt;
+        e.mesh.position.x += e.vel.x * dt;
+        e.mesh.position.y += e.vel.y * dt;
+        e.mesh.position.z += e.vel.z * dt;
+        const eR = 0.35 * e.mesh.scale.x;
+        slideCollision(e.mesh.position, e.vel, eR, dt);
+        if(e.mesh.position.y < 0.5) { e.mesh.position.y = 0.5; e.vel.y = 0; }
+      }
+    }
+
+    // ── Shooter fires back ──
+    if(e.type === 1 && e.shootCd <= 0 && distToPlayer < 15){
+      const dir = player.pos.clone().sub(e.mesh.position.clone().add(new THREE.Vector3(0,0.8,0))).normalize();
+      const b = spawnBullet(e.mesh.position.clone().add(new THREE.Vector3(0,0.8,0)), dir, 10, true);
+      if(b) e.shootCd = 1.2 + Math.random()*0.8;
+    }
+
+    // ── Boss attacks ──
+    if(e.type === 2){
+      // Boss melee attack
+      if(distToPlayer < 3.0 && e.shootCd <= 0){
+        player.hp -= 15;
+        e.shootCd = 2.0;
+        // Knockback player
+        const kb = player.pos.clone().sub(e.mesh.position).normalize().multiplyScalar(6);
+        player.vel.add(kb);
+        player.vel.y = 5;
+        flashDamage();
+      }
+      // Boss shoots periodically
+      if(distToPlayer < 18 && e.shootCd <= 0){
+        const dir = player.pos.clone().sub(e.mesh.position.clone().add(new THREE.Vector3(0,1.5,0))).normalize();
+        const b = spawnBullet(e.mesh.position.clone().add(new THREE.Vector3(0,1.5,0)), dir, 15, true);
+        if(b){ b.mesh.material.color.setHex(0xff00ff); e.shootCd = 1.0; }
+      }
+      if(e.shootCd <= 0 && distToPlayer > 18) e.shootCd = 0.5;
+    }
+
+    // ── Enemy death ──
+    if(e.hp <= 0){
+      e.active = false; e.mesh.visible = false;
+      kills++;
+      spawnParticle(e.mesh.position.clone(), 0xff0000);
+      spawnParticle(e.mesh.position.clone(), 0xff4400);
+      if(e.type === 2){
+        bossDead = true;
+        addKillFeed('💀 BOSS DEFEATED!');
+        setTimeout(victory, 1500);
+      } else {
+        addKillFeed('Enemy killed!');
+      }
+    }
+
+    // ── Player takes damage from proximity ──
+    if(e.type !== 2 && distToPlayer < 1.5){
+      player.hp -= 8 * dt;
+      flashDamage();
+    }
+  }
+
+  // ── Player death ──
+  if(player.hp <= 0){
+    player.hp = 0;
+    gameOver();
+  }
+
+  // ── Particles ──
+  for(const p of particles){
+    if(!p.active) continue;
+    p.life -= dt;
+    if(p.life <= 0){ p.active=false; p.mesh.visible=false; continue; }
+    p.vel.y += GRAVITY * 0.5 * dt;
+    p.mesh.position.addScaledVector(p.vel, dt);
+    p.mesh.scale.setScalar(Math.max(0, p.life * 2));
+  }
+
+  // ── HUD ──
+  const hpPct = Math.max(0, player.hp / player.maxHp * 100);
+  hpBarEl.style.width = hpPct + '%';
+  hpBarEl.style.background = hpPct > 50 ? 'linear-gradient(90deg,#0a0,#0f0)' : hpPct > 25 ? 'linear-gradient(90deg,#aa0,#ff0)' : 'linear-gradient(90deg,#a00,#f00)';
+  hpTextEl.textContent = `${Math.max(0,Math.floor(player.hp))} / ${player.maxHp}`;
+
+  const activeEnemies = enemies.filter(e => e.active);
+  enemyCountEl.textContent = activeEnemies.length;
+  aliveCountEl.textContent = activeEnemies.length;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   HUD HELPERS
+   ═══════════════════════════════════════════════════════════ */
+function flashDamage(){
+  damageFlashEl.classList.add('show');
+  setTimeout(()=> damageFlashEl.classList.remove('show'), 150);
+}
+
+const killFeedMessages = [];
+function addKillFeed(msg){
+  killFeedMessages.push({text:msg, time:2.0});
+}
+
+function updateKillFeed(){
+  for(let i=killFeedMessages.length-1; i>=0; i--){
+    killFeedMessages[i].time -= 1/60;
+    if(killFeedMessages[i].time <= 0) killFeedMessages.splice(i, 1);
+  }
+  killFeedEl.innerHTML = killFeedMessages.map(m =>
+    `<div style="opacity:${Math.min(1, m.time)}">${m.text}</div>`
+  ).join('');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   MINIMAP
+   ═══════════════════════════════════════════════════════════ */
+const minimapCanvas = document.getElementById('minimap');
+const mctx = minimapCanvas.getContext('2d');
+const MM_SCALE = 3.5;
+const MM_CX = 80, MM_CY = 60;
+const MM_OX = 0, MM_OZ = 15; // offset
+
+function drawMinimap(){
+  mctx.fillStyle = 'rgba(0,0,0,0.8)';
+  mctx.fillRect(0,0,160,120);
+
+  // Draw walls (simplified)
+  mctx.strokeStyle = '#335';
+  mctx.lineWidth = 1;
+  // Room B
+  mctx.strokeRect(
+    MM_CX + (-10-MM_OX)*MM_SCALE, MM_CY + (-10-MM_OZ)*MM_SCALE,
+    20*MM_SCALE, 10*MM_SCALE
+  );
+  // Room A
+  mctx.strokeRect(
+    MM_CX + (-10-MM_OX)*MM_SCALE, MM_CY + (-20-MM_OZ)*MM_SCALE,
+    20*MM_SCALE, 10*MM_SCALE
+  );
+  // Boss Arena
+  mctx.strokeStyle = '#852';
+  mctx.strokeRect(
+    MM_CX + (-8-MM_OX)*MM_SCALE, MM_CY + (25-MM_OZ)*MM_SCALE,
+    16*MM_SCALE, 8*MM_SCALE
+  );
+  // Corridor
+  mctx.strokeStyle = '#335';
+  mctx.strokeRect(
+    MM_CX + (-3-MM_OX)*MM_SCALE, MM_CY + (0-MM_OZ)*MM_SCALE,
+    6*MM_SCALE, 25*MM_SCALE
+  );
+
+  // Enemies
+  enemies.forEach(e => {
+    if(!e.active) return;
+    const mx = MM_CX + (e.mesh.position.x - MM_OX)*MM_SCALE;
+    const my = MM_CY + (e.mesh.position.z - MM_OZ)*MM_SCALE;
+    mctx.fillStyle = e.type === 2 ? '#f0f' : e.type === 1 ? '#f44' : '#888';
+    mctx.beginPath();
+    mctx.arc(mx, my, e.type===2?4:3, 0, Math.PI*2);
+    mctx.fill();
+  });
+
+  // Player
+  const ppx = MM_CX + (player.pos.x - MM_OX)*MM_SCALE;
+  const ppy = MM_CY + (player.pos.z - MM_OZ)*MM_SCALE;
+  mctx.fillStyle = '#0f0';
+  mctx.beginPath();
+  mctx.arc(ppx, ppy, 3, 0, Math.PI*2);
+  mctx.fill();
+
+  // Player direction
+  const f = new THREE.Vector3(0,0,-1).applyQuaternion(yawQ);
+  mctx.strokeStyle = '#0f0';
+  mctx.lineWidth = 1;
+  mctx.beginPath();
+  mctx.moveTo(ppx, ppy);
+  mctx.lineTo(ppx+f.x*10, ppy+f.z*10);
+  mctx.stroke();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   MAIN LOOP
+   ═══════════════════════════════════════════════════════════ */
+let lastTime = performance.now();
+let accumulator = 0;
+let frameCount = 0;
+
+function loop(time){
+  requestAnimationFrame(loop);
+  const delta = Math.min((time - lastTime) / 1000, 0.1);
+  lastTime = time;
+
+  if(gameState === 'playing'){
+    accumulator += delta;
+    while(accumulator >= FIXED_DT){
+      update(FIXED_DT);
+      accumulator -= FIXED_DT;
+    }
+    updateKillFeed();
+    drawMinimap();
+  }
+
+  renderer.render(scene, camera);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   RESIZE
+   ═══════════════════════════════════════════════════════════ */
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// Start loop
+showScreen(startScreen);
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>
