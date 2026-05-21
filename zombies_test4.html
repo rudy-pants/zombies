@@ -1,0 +1,1257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Space Station Omega - FPS</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;user-select:none}
+body{overflow:hidden;background:#000;font-family:'Courier New',monospace}
+canvas{display:block;width:100vw;height:100vh}
+#crosshair{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#0f0;font-size:28px;display:none;text-shadow:0 0 6px #0f0,0 0 12px #0a0;z-index:20;pointer-events:none;font-weight:bold}
+#hud{position:fixed;bottom:20px;left:20px;color:#0f0;font-size:15px;display:none;z-index:20;pointer-events:none;line-height:1.8;text-shadow:0 0 4px #0a0}
+#hud div{margin:2px 0}
+#healthBar{width:220px;height:16px;border:1px solid #0f0;background:rgba(0,20,0,0.8);margin:2px 0}
+#healthFill{height:100%;background:linear-gradient(90deg,#0a0,#0f0);transition:width 0.15s}
+#bossHealth{position:fixed;top:24px;left:50%;transform:translateX(-50%);width:420px;height:22px;border:2px solid #f44;background:rgba(40,0,0,0.8);display:none;z-index:20;pointer-events:none}
+#bossHealthFill{height:100%;background:linear-gradient(90deg,#a00,#f44);transition:width 0.2s;border-radius:2px}
+#bossLabel{position:fixed;top:50px;left:50%;transform:translateX(-50%);color:#f44;font-size:14px;display:none;z-index:20;pointer-events:none;text-shadow:0 0 8px #f00;letter-spacing:2px}
+#weaponInfo{position:fixed;bottom:20px;right:20px;color:#0f0;font-size:14px;text-align:right;display:none;z-index:20;pointer-events:none;text-shadow:0 0 4px #0a0}
+#cooldownBar{width:160px;height:12px;border:1px solid #ff0;background:rgba(20,20,0,0.7);margin-top:4px}
+#cooldownFill{height:100%;background:linear-gradient(90deg,#fa0,#ff0);width:0%}
+#damageFlash{position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at center,rgba(255,0,0,0.4),rgba(255,0,0,0.1));pointer-events:none;opacity:0;z-index:5;transition:opacity 0.08s}
+#minimap{position:fixed;top:20px;left:20px;width:160px;height:160px;border:1px solid rgba(0,255,0,0.6);background:rgba(0,5,0,0.85);display:none;z-index:20;pointer-events:none}
+#levelIndicator{position:fixed;top:60px;left:50%;transform:translateX(-50%);color:#ff0;font-size:15px;display:none;z-index:20;pointer-events:none;text-shadow:0 0 8px #ff0;letter-spacing:2px}
+#msgOverlay{position:fixed;top:35%;left:50%;transform:translate(-50%,-50%);color:#ff0;font-size:22px;display:none;z-index:25;pointer-events:none;text-shadow:0 0 12px #ff0;letter-spacing:3px;text-align:center}
+
+.overlay{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;pointer-events:auto}
+#startMenu{background:radial-gradient(ellipse at center,rgba(0,12,30,0.97) 0%,rgba(0,0,0,0.99) 100%)}
+#pauseMenu{background:rgba(0,0,0,0.75);display:none;backdrop-filter:blur(4px)}
+#endMenu{background:rgba(0,0,0,0.88);display:none}
+.menu-title{font-size:52px;color:#0f0;text-shadow:0 0 20px #0f0,0 0 40px #080,0 0 80px #060;margin-bottom:20px;letter-spacing:5px;text-align:center}
+.menu-subtitle{font-size:16px;color:#0a0;margin-bottom:30px;text-align:center;line-height:1.8;max-width:600px}
+.menu-btn{background:none;border:2px solid #0f0;color:#0f0;padding:14px 44px;font-size:19px;font-family:'Courier New',monospace;cursor:pointer;margin:8px;pointer-events:auto;letter-spacing:3px;transition:all 0.2s}
+.menu-btn:hover{background:rgba(0,255,0,0.2);box-shadow:0 0 20px rgba(0,255,0,0.4);transform:scale(1.03)}
+.menu-btn:active{transform:scale(0.97)}
+.controls-info{margin-top:35px;color:#0a0;font-size:13px;text-align:center;line-height:2.2}
+.controls-info span{color:#0f0;font-weight:bold}
+.victory{color:#0f0;text-shadow:0 0 30px #0f0,0 0 60px #080}
+.defeat{color:#f44;text-shadow:0 0 30px #f44,0 0 60px #a00}
+#endSubtitle{color:#ccc;line-height:2}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div id="crosshair">+</div>
+
+<div id="hud">
+<div id="healthBar"><div id="healthFill" style="width:100%"></div></div>
+<div id="healthText">HP: 100 / 100</div>
+<div id="killCount">Kills: 0</div>
+<div id="jumpIndicator">Jumps: 2 / 2</div>
+</div>
+
+<div id="bossHealth"><div id="bossHealthFill" style="width:100%"></div></div>
+<div id="bossLabel">▸ OMEGA OVERLORD ◂</div>
+
+<div id="weaponInfo">
+<div id="weaponName">PISTOL</div>
+<div id="propLabel" style="color:#ff0;margin-top:2px;font-size:12px">PROPEL CANNON [E]</div>
+<div id="cooldownBar"><div id="cooldownFill"></div></div>
+</div>
+
+<div id="damageFlash"></div>
+<canvas id="minimap"></canvas>
+<div id="levelIndicator"></div>
+<div id="msgOverlay"></div>
+
+<div id="startMenu" class="overlay">
+<div class="menu-title" style="font-size:58px">SPACE STATION OMEGA</div>
+<div class="menu-subtitle">
+Hostile entities have overrun the orbital platform.<br>
+Navigate the station, eliminate all threats, and destroy the OMEGA OVERLORD.<br>
+<br>
+<span style="font-size:13px;color:#080">▸ Headshots deal 2.5× critical damage to all enemies</span>
+</div>
+<button class="menu-btn" id="btnStart">▶ START MISSION</button>
+<div class="controls-info">
+<span>WASD</span> Move &nbsp;|&nbsp; <span>MOUSE</span> Aim &nbsp;|&nbsp; <span>LEFT CLICK</span> Pistol<br>
+<span>RIGHT CLICK</span> Zoom &nbsp;|&nbsp; <span>SPACE</span> Jump (×2 double-jump) &nbsp;|&nbsp; <span>E</span> Propulsion Cannon<br>
+<span>ESC</span> Pause &nbsp;|&nbsp; <span>F</span> Toggle flashlight
+</div>
+</div>
+
+<div id="pauseMenu" class="overlay">
+<div class="menu-title" style="font-size:44px">⏸ PAUSED</div>
+<button class="menu-btn" id="btnResume">▶ RESUME</button>
+<button class="menu-btn" id="btnQuit">✕ QUIT TO MENU</button>
+</div>
+
+<div id="endMenu" class="overlay">
+<div id="endTitle" class="menu-title" style="font-size:50px"></div>
+<div id="endSubtitle" class="menu-subtitle"></div>
+<button class="menu-btn" id="btnRestart">▶ PLAY AGAIN</button>
+</div>
+
+<script>
+'use strict';
+// ============================================================
+// MATH UTILITIES
+// ============================================================
+const V = {
+  dot:(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],
+  len:(a)=>Math.sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]),
+  lenSq:(a)=>a[0]*a[0]+a[1]*a[1]+a[2]*a[2],
+  dist:(a,b)=>{const dx=a[0]-b[0],dy=a[1]-b[1],dz=a[2]-b[2];return Math.sqrt(dx*dx+dy*dy+dz*dz)},
+  distSq:(a,b)=>{const dx=a[0]-b[0],dy=a[1]-b[1],dz=a[2]-b[2];return dx*dx+dy*dy+dz*dz},
+  normalize:(o,a)=>{const l=Math.sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);if(l>1e-8){const i=1/l;o[0]=a[0]*i;o[1]=a[1]*i;o[2]=a[2]*i}},
+  sub:(o,a,b)=>{o[0]=a[0]-b[0];o[1]=a[1]-b[1];o[2]=a[2]-b[2];return o},
+  scale:(o,a,s)=>{o[0]=a[0]*s;o[1]=a[1]*s;o[2]=a[2]*s;return o},
+  copy:(a)=>[a[0],a[1],a[2]],
+  lerp:(o,a,b,t)=>{o[0]=a[0]+(b[0]-a[0])*t;o[1]=a[1]+(b[1]-a[1])*t;o[2]=a[2]+(b[2]-a[2])*t;return o},
+  cross:(o,a,b)=>{o[0]=a[1]*b[2]-a[2]*b[1];o[1]=a[2]*b[0]-a[0]*b[2];o[2]=a[0]*b[1]-a[1]*b[0];return o}
+};
+
+const _t0=[0,0,0],_t1=[0,0,0],_t2=[0,0,0],_t3=[0,0,0];
+
+// Quaternion for camera rotation (avoids gimbal lock)
+const Q = {
+  mul:(o,a,b)=>{
+    const ax=a[0],ay=a[1],az=a[2],aw=a[3],bx=b[0],by=b[1],bz=b[2],bw=b[3];
+    o[0]=ax*bw+aw*bx+ay*bz-az*by;
+    o[1]=ay*bw+aw*by+az*bx-ax*bz;
+    o[2]=az*bw+aw*bz+ax*by-ay*bx;
+    o[3]=aw*bw-ax*bx-ay*by-az*bz;return o;
+  },
+  fromAxisAngle:(o,axis,angle)=>{const s=Math.sin(angle*0.5);o[0]=axis[0]*s;o[1]=axis[1]*s;o[2]=axis[2]*s;o[3]=Math.cos(angle*0.5);return o;},
+  rotVec:(o,q,v)=>{
+    const qx=q[0],qy=q[1],qz=q[2],qw=q[3];
+    const ix=qw*v[0]+qy*v[2]-qz*v[1],iy=qw*v[1]+qz*v[0]-qx*v[2],iz=qw*v[2]+qx*v[1]-qy*v[0],iw=-qx*v[0]-qy*v[1]-qz*v[2];
+    o[0]=ix*qw-iw*qx+iy*-qz-iz*-qy;
+    o[1]=iy*qw-iw*qy+iz*-qx-ix*-qz;
+    o[2]=iz*qw-iw*qz+ix*-qy-iy*-qx;return o;
+  }
+};
+
+const M4 = {
+  id:()=>new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]),
+  copy:(o,m)=>{for(let i=0;i<16;i++)o[i]=m[i];return o;},
+  mul:(o,a,b)=>{
+    for(let i=0;i<4;i++)for(let j=0;j<4;j++){o[i*4+j]=0;for(let k=0;k<4;k++)o[i*4+j]+=a[k*4+j]*b[i*4+k]}return o;
+  },
+  translate:(o,m,x,y,z)=>{
+    const t=new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,x,y,z,1]);return M4.mul(o,m,t);
+  },
+  scale:(o,m,sx,sy,sz)=>{
+    const s=new Float32Array([sx,0,0,0,0,sy,0,0,0,0,sz,0,0,0,0,1]);return M4.mul(o,m,s);
+  },
+  perspective:(o,fov,asp,near,far)=>{
+    const f=1/Math.tan(fov*0.5),nf=1/(near-far);
+    o[0]=f/asp;o[1]=0;o[2]=0;o[3]=0;o[4]=0;o[5]=f;o[6]=0;o[7]=0;
+    o[8]=0;o[9]=0;o[10]=(far+near)*nf;o[11]=-1;o[12]=0;o[13]=0;o[14]=2*far*near*nf;o[15]=0;return o;
+  },
+  lookAt:(o,eye,ctr,up)=>{
+    // Use distinct arrays for each basis vector — sharing _t0/_t1 aliases them,
+    // making cross(z,x)=[0,0,0] and producing a degenerate view matrix.
+    const eyex=eye[0],eyey=eye[1],eyez=eye[2];
+    const z0=eyex-ctr[0],z1=eyey-ctr[1],z2=eyez-ctr[2];
+    const zl=Math.sqrt(z0*z0+z1*z1+z2*z2);
+    if(zl<1e-10){o=M4.id();return o;}
+    const iz=1/zl;
+    const fz0=z0*iz,fz1=z1*iz,fz2=z2*iz; // forward (z) = normalized(eye-center)
+    // x = normalize(cross(up, forward))
+    const ux=up[0],uy=up[1],uz=up[2];
+    let fx=uy*fz2-uz*fz1,fy=uz*fz0-ux*fz2,fz=ux*fz1-uy*fz0;
+    const fl=Math.sqrt(fx*fx+fy*fy+fz*fz);
+    if(fl<1e-10){o=M4.id();return o;}
+    const ifl=1/fl;fx*=ifl;fy*=ifl;fz*=ifl; // right (x)
+    // y = cross(forward, x)
+    const fy0=fz1*fz-fz2*fy,fy1=fz2*fx-fz0*fz,fy2=fz0*fy-fz1*fx; // up (y)
+    o[0]=fx;o[1]=fy0;o[2]=fz0;o[3]=0;
+    o[4]=fy;o[5]=fy1;o[6]=fz1;o[7]=0;
+    o[8]=fz;o[9]=fy2;o[10]=fz2;o[11]=0;
+    o[12]=-(fx*eyex+fy*eyey+fz*eyez);o[13]=-(fy0*eyex+fy1*eyey+fy2*eyez);o[14]=-(fz0*eyex+fz1*eyey+fz2*eyez);o[15]=1;return o;
+  }
+};
+
+// ============================================================
+// OBJECT POOL
+// ============================================================
+class Pool {
+  constructor(mk,reset,init=60){this.pool=[];this.active=[];this.mk=mk;this.reset=reset;for(let i=0;i<init;i++)this.pool.push(mk());}
+  get(){const o=this.pool.length?this.pool.pop():this.mk();this.active.push(o);return o;}
+  put(o){const i=this.active.indexOf(o);if(i>=0){this.active.splice(i,1);this.reset(o);this.pool.push(o);}}
+  clear(){for(const o of this.active)this.pool.push(o);this.active.length=0;}
+}
+
+// ============================================================
+// AABB COLLISION
+// ============================================================
+class AABB {
+  constructor(mi,ma){this.mi=mi;this.ma=ma;}
+  static fromCS(x,y,z,sx,sy,sz){return new AABB([x-sx/2,y-sy/2,z-sz/2],[x+sx/2,y+sy/2,z+sz/2]);}
+  hit(o){return this.mi[0]<=o.ma[0]&&this.ma[0]>=o.mi[0]&&this.mi[1]<=o.ma[1]&&this.ma[1]>=o.mi[1]&&this.mi[2]<=o.ma[2]&&this.ma[2]>=o.mi[2];}
+  pt(px,py,pz){return px>=this.mi[0]&&px<=this.ma[0]&&py>=this.mi[1]&&py<=this.ma[1]&&pz>=this.mi[2]&&pz<=this.ma[2];}
+}
+
+// ============================================================
+// WEBGL RENDERER
+// ============================================================
+class Renderer {
+  constructor(canvas){
+    this.c=canvas;this.gl=canvas.getContext('webgl',{antialias:true,alpha:false});
+    if(!this.gl)throw new Error('No WebGL');
+    const gl=this.gl;
+    gl.enable(gl.DEPTH_TEST);gl.enable(gl.CULL_FACE);gl.cullFace(gl.BACK);
+    gl.clearColor(0.005,0.005,0.02,1);
+
+    // Main shader with uniform color
+    this.prog=this._prog(
+`attribute vec3 aP;attribute vec3 aN;
+uniform mat4 uMVP;uniform mat4 uMdl;uniform mat3 uNM;
+varying vec3 vN;varying vec3 vWP;varying vec3 vC;
+void main(){
+  gl_Position=uMVP*vec4(aP,1.0);
+  vN=normalize(uNM*aN);
+  vWP=(uMdl*vec4(aP,1.0)).xyz;
+}`,
+`precision mediump float;
+varying vec3 vN;varying vec3 vWP;varying vec3 vC;
+uniform vec3 uCol;uniform vec3 uLD;uniform vec3 uCP;uniform vec3 uAmb;uniform float uEmit;
+void main(){
+  vec3 N=normalize(vN);vec3 L=normalize(uLD);
+  float d=max(dot(N,L),0.0);
+  vec3 V=normalize(uCP-vWP);vec3 H=normalize(L+V);
+  float sp=pow(max(dot(N,H),0.0),24.0)*0.25;
+  vec3 c=uCol*(uAmb+d*0.7)+vec3(0.9)*sp;
+  c=mix(c,uCol*1.6,uEmit);
+  gl_FragColor=vec4(c,1.0);
+}`);
+    this.locs={
+      aP:gl.getAttribLocation(this.prog,'aP'),aN:gl.getAttribLocation(this.prog,'aN'),
+      uMVP:gl.getUniformLocation(this.prog,'uMVP'),uMdl:gl.getUniformLocation(this.prog,'uMdl'),
+      uNM:gl.getUniformLocation(this.prog,'uNM'),uCol:gl.getUniformLocation(this.prog,'uCol'),
+      uLD:gl.getUniformLocation(this.prog,'uLD'),uCP:gl.getUniformLocation(this.prog,'uCP'),
+      uAmb:gl.getUniformLocation(this.prog,'uAmb'),uEmit:gl.getUniformLocation(this.prog,'uEmit')
+    };
+
+    // Cube geometry
+    this.cube=this._makeCube();
+    // Reusable normal matrix (avoids allocating new Float32Array every draw)
+    this._nm=new Float32Array(9);
+    gl.useProgram(this.prog);
+  }
+
+  _prog(vs,fs){
+    const v=this.gl.createShader(this.gl.VERTEX_SHADER);
+    this.gl.shaderSource(v,vs);this.gl.compileShader(v);
+    if(!this.gl.getShaderParameter(v,this.gl.COMPILE_STATUS))console.error('VS:',this.gl.getShaderInfoLog(v));
+    const f=this.gl.createShader(this.gl.FRAGMENT_SHADER);
+    this.gl.shaderSource(f,fs);this.gl.compileShader(f);
+    if(!this.gl.getShaderParameter(f,this.gl.COMPILE_STATUS))console.error('FS:',this.gl.getShaderInfoLog(f));
+    const p=this.gl.createProgram();
+    this.gl.attachShader(p,v);this.gl.attachShader(p,f);this.gl.linkProgram(p);return p;
+  }
+
+  _makeCube(){
+    const gl=this.gl;
+    // 6 faces, 2 triangles each, 3 vertices each = 36 vertices
+    const faces=[
+      {n:[0,0,1],v:[[-1,-1,1],[1,-1,1],[1,1,1],[-1,-1,1],[1,1,1],[-1,1,1]]},
+      {n:[0,0,-1],v:[[1,-1,-1],[-1,-1,-1],[-1,1,-1],[1,-1,-1],[-1,1,-1],[1,1,-1]]},
+      {n:[1,0,0],v:[[1,-1,1],[1,-1,-1],[1,1,-1],[1,-1,1],[1,1,-1],[1,1,1]]},
+      {n:[-1,0,0],v:[[-1,-1,-1],[-1,-1,1],[-1,1,1],[-1,-1,-1],[-1,1,1],[-1,1,-1]]},
+      {n:[0,1,0],v:[[-1,1,1],[1,1,1],[1,1,-1],[-1,1,1],[1,1,-1],[-1,1,-1]]},
+      {n:[0,-1,0],v:[[-1,-1,-1],[1,-1,-1],[1,-1,1],[-1,-1,-1],[1,-1,1],[-1,-1,1]]}
+    ];
+    const pos=[],nrm=[];
+    for(const f of faces){for(const v of f.v){pos.push(v[0],v[1],v[2]);nrm.push(f.n[0],f.n[1],f.n[2]);}}
+    const pB=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,pB);
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(pos),gl.STATIC_DRAW);
+    const nB=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,nB);
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(nrm),gl.STATIC_DRAW);
+    return{pB,nB,count:36};
+  }
+
+  draw(mdl,mvp,col,emit,cp){
+    const gl=this.gl;
+    gl.useProgram(this.prog);
+    // Normal matrix (upper-left 3x3) — reuse pooled array
+    const m=mdl,nm=this._nm;
+    nm[0]=m[0];nm[1]=m[1];nm[2]=m[2];nm[3]=m[4];nm[4]=m[5];nm[5]=m[6];nm[6]=m[8];nm[7]=m[9];nm[8]=m[10];
+
+    gl.uniformMatrix4fv(this.locs.uMVP,false,mvp);
+    gl.uniformMatrix4fv(this.locs.uMdl,false,mdl);
+    gl.uniformMatrix3fv(this.locs.uNM,false,nm);
+    gl.uniform3fv(this.locs.uCol,col);
+    gl.uniform3fv(this.locs.uLD,[0.35,0.75,0.3]);
+    gl.uniform3fv(this.locs.uCP,cp);
+    gl.uniform3fv(this.locs.uAmb,[0.1,0.1,0.16]);
+    gl.uniform1f(this.locs.uEmit,emit||0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER,this.cube.pB);
+    gl.enableVertexAttribArray(this.locs.aP);
+    gl.vertexAttribPointer(this.locs.aP,3,gl.FLOAT,false,0,0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER,this.cube.nB);
+    gl.enableVertexAttribArray(this.locs.aN);
+    gl.vertexAttribPointer(this.locs.aN,3,gl.FLOAT,false,0,0);
+
+    gl.drawArrays(gl.TRIANGLES,0,this.cube.count);
+  }
+
+  resize(w,h){this.c.width=w;this.c.height=h;this.gl.viewport(0,0,w,h);}
+  clear(){this.gl.clear(this.gl.COLOR_BUFFER_BIT|this.gl.DEPTH_BUFFER_BIT);}
+}
+
+// ============================================================
+// STAR FIELD
+// ============================================================
+function mkStars(n=1200){
+  const s=[];
+  for(let i=0;i<n;i++)s.push({
+    x:(Math.random()-0.5)*350,y:(Math.random()-0.5)*350,z:(Math.random()-0.5)*350,
+    b:0.3+Math.random()*0.7,sz:0.02+Math.random()*0.04,
+    tw:0.5+Math.random()*2,ph:Math.random()*6.283
+  });
+  return s;
+}
+
+// ============================================================
+// CONSTANTS
+// ============================================================
+const PL_MASS=80,CRAWL_MASS=40,SHOT_MASS=68,BOSS_MASS=160;
+const GRAV=-16;
+const PL_SPEED=8,PL_ACCEL=35,PL_DECEL=14;
+const JUMP_F=10,DOUBLE_F=8;
+const MOUSE_SEN=0.0018;
+const ZOOM_FOV=0.45,NORM_FOV=1.1;
+const PISTOL_CD=0.18,PISTOL_DMG=20;
+const ORB_CD=3.0,ORB_DMG=12,ORB_KB=55;
+const HEADSHOT_MULT=2.5;
+
+// ============================================================
+// LEVEL DESIGN: Orbital Station Omega
+// ============================================================
+function createLevel(){
+  const plats=[],enemies=[],aabs=[];
+
+  function addP(p,s,c){plats.push({pos:p,size:s,color:c});aabs.push(AABB.fromCS(p[0],p[1],p[2],s[0],s[1],s[2]));}
+  function addE(type,pos){enemies.push({type,pos});}
+
+  // === SECTOR A: Station Alpha (starting area) ===
+  // Platform 0: Main spawn platform
+  addP([0,0,0],[14,0.6,14],[0.12,0.22,0.28]);
+
+  // Decorative structures on spawn
+  addP([-4,1.5,-4],[0.8,3,0.8],[0.25,0.35,0.45]);
+  addP([4,1.5,-4],[0.8,3,0.8],[0.25,0.35,0.45]);
+  addP([-4,1.5,4],[0.8,3,0.8],[0.25,0.35,0.45]);
+  addP([4,1.5,4],[0.8,3,0.8],[0.25,0.35,0.45]);
+  addP([0,1.5,-5],[10,0.4,0.8],[0.18,0.28,0.38]); // back wall segment
+
+  // === SECTOR B: Bridge ===
+  // Platform 1: First jump target
+  addP([0,3.5,14],[11,0.6,11],[0.12,0.22,0.28]);
+  addE('crawler',[2,4,14]);
+  addE('crawler',[-3,4,12]);
+
+  // Platform 2: Bridge connector (narrow)
+  addP([8,5.5,23],[5,0.5,12],[0.2,0.2,0.35]);
+  addE('shooter',[8,6,23]);
+
+  // Platform 3: Mid combat zone
+  addP([0,7.5,34],[13,0.6,13],[0.12,0.22,0.28]);
+  addE('crawler',[4,8,34]);
+  addE('crawler',[-4,8,31]);
+  addE('shooter',[0,8,36]);
+
+  // Side platform (ambush / shortcut)
+  addP([15,9.5,38],[5,0.5,5],[0.12,0.22,0.28]);
+  addE('crawler',[15,10,38]);
+
+  // === SECTOR C: Advanced Combat ===
+  // Platform 4: Elevated combat zone
+  addP([-10,11,44],[11,0.6,11],[0.15,0.18,0.3]);
+  addE('shooter',[-10,11.5,44]);
+  addE('shooter',[-7,11.5,41]);
+
+  // Platform 5: Narrow bridge to boss
+  addP([3,13,54],[7,0.5,8],[0.25,0.15,0.15]);
+  addE('crawler',[3,13.5,54]);
+
+  // === BOSS ARENA ===
+  // Platform 6: Large boss arena
+  addP([0,15,68],[22,0.6,22],[0.3,0.08,0.08]);
+  addE('boss',[0,15.5,68]);
+
+  // Arena containment walls
+  addP([-12,16.5,68],[0.6,3,22],[0.22,0.06,0.06]);
+  addP([12,16.5,68],[0.6,3,22],[0.22,0.06,0.06]);
+  addP([0,16.5,57],[24.6,3,0.6],[0.22,0.06,0.06]);
+  addP([0,16.5,79],[24.6,3,0.6],[0.22,0.06,0.06]);
+
+  // Arena pillars (cover)
+  addP([-6,16.5,64],[1.2,3,1.2],[0.28,0.15,0.12]);
+  addP([6,16.5,72],[1.2,3,1.2],[0.28,0.15,0.12]);
+  addP([-6,16.5,72],[1.2,3,1.2],[0.28,0.15,0.12]);
+  addP([6,16.5,64],[1.2,3,1.2],[0.28,0.15,0.12]);
+
+  return{plats,enemies,aabs,spawn:[0,2.5,0],bossPlat:6};
+}
+
+// ============================================================
+// ENTITY FACTORIES
+// ============================================================
+function mkPlayer(){return{
+  pos:[0,2.5,0],vel:[0,0,0],rad:0.4,hgt:1.8,mass:PL_MASS,
+  hp:100,maxHp:100,jumps:2,ground:false,
+  yawQ:[0,0,0,1],pitch:0,
+  cannonCd:0,cannonMax:ORB_CD,kills:0,alive:true,
+  invTimer:0,kbTimer:0,kb:[0,0,0]
+};}
+
+function mkCrawler(pos){return{
+  type:'crawler',pos:V.copy(pos),vel:[0,0,0],rad:0.25,hgt:0.5,mass:CRAWL_MASS,
+  hp:30,maxHp:30,speed:6,atkRng:2.5,atkDmg:8,atkCd:0,atkMaxCd:1.0,
+  headH:0.4,alive:true,aggroRng:16,ai:'patrol',aiT:0,ptgt:null,
+  spawn:V.copy(pos),kbTimer:0,kb:[0,0,0],
+  col:[0.55,0.18,0.1],hcol:[0.85,0.25,0.1]
+};}
+
+function mkShooter(pos){return{
+  type:'shooter',pos:V.copy(pos),vel:[0,0,0],rad:0.45,hgt:1.7,mass:SHOT_MASS,
+  hp:65,maxHp:65,speed:2.5,atkRng:22,atkDmg:12,atkCd:0,atkMaxCd:2.2,
+  headH:1.5,alive:true,aggroRng:22,ai:'patrol',aiT:0,ptgt:null,
+  spawn:V.copy(pos),kbTimer:0,kb:[0,0,0],
+  col:[0.08,0.28,0.55],hcol:[0.15,0.45,0.85]
+};}
+
+function mkBoss(pos){return{
+  type:'boss',pos:V.copy(pos),vel:[0,0,0],rad:0.9,hgt:3.0,mass:BOSS_MASS,
+  hp:500,maxHp:500,speed:1.3,atkRng:18,atkDmg:28,atkCd:0,atkMaxCd:3.5,
+  headH:2.5,alive:true,aggroRng:30,ai:'patrol',aiT:0,ptgt:null,
+  spawn:V.copy(pos),kbTimer:0,kb:[0,0,0],
+  col:[0.55,0,0],hcol:[0.9,0.15,0],phase:1,chargeCd:0
+};}
+
+function mkProj(){return{
+  isP:false,pos:[0,-200,0],vel:[0,0,0],dir:[0,0,1],
+  dmg:0,type:'b',life:0,rad:0.05,kbF:0,
+  col:[0,1,0.5],emit:0.4
+};}
+function mkEProj(){return mkProj();}
+function mkPart(){return{
+  pos:[0,-200,0],vel:[0,0,0],col:[1,1,1],
+  life:0,maxL:1,sz:0.05
+};}
+
+// ============================================================
+// GAME STATE
+// ============================================================
+const canvas=document.getElementById('gameCanvas');
+const mmpCvs=document.getElementById('minimap');
+const mmpCtx=mmpCvs.getContext('2d');
+mmpCvs.width=160;mmpCvs.height=160;
+
+let renderer,level,stars;
+let player,enemies=[];
+let projs,eProjs,parts;
+let keys={},mouseL=false,mouseR=false;
+let gameState='MENU'; // MENU, PLAYING, PAUSED, GAMEOVER, VICTORY
+let pistolCd=0;
+let shakeT=0,shakeI=0;
+let currentFOV=NORM_FOV;
+let viewMat=new Float32Array(16),projMat=new Float32Array(16),vpMat=new Float32Array(16);
+let mdlMat=new Float32Array(16),mvpMat=new Float32Array(16);
+let msgTimer=0,msgText='';
+
+// ============================================================
+// UI HELPERS
+// ============================================================
+function $(id){return document.getElementById(id);}
+function showHUD(on){
+  ['crosshair','hud','weaponInfo','minimap','levelIndicator'].forEach(id=>{
+    $(id).style.display=on?'block':'none';
+  });
+  $('cooldownBar').style.display='block';
+}
+function showMessage(text,dur=2000){msgText=text;msgTimer=dur;const m=$('msgOverlay');m.textContent=text;m.style.display='block';}
+
+// ============================================================
+// INIT
+// ============================================================
+function init(){
+  renderer=new Renderer(canvas);
+  renderer.resize(window.innerWidth,window.innerHeight);
+  stars=mkStars(1000);
+
+  window.addEventListener('resize',()=>renderer.resize(window.innerWidth,window.innerHeight));
+  document.addEventListener('keydown',onKeyD);
+  document.addEventListener('keyup',onKeyU);
+  document.addEventListener('mousedown',onMouseD);
+  document.addEventListener('mouseup',onMouseU);
+  document.addEventListener('mousemove',onMouseM);
+  document.addEventListener('contextmenu',e=>e.preventDefault());
+
+  $('btnStart').onclick=startGame;
+  $('btnResume').onclick=resumeGame;
+  $('btnQuit').onclick=quitMenu;
+  $('btnRestart').onclick=startGame;
+
+  requestAnimationFrame(loop);
+}
+
+// ============================================================
+// GAME STATE MANAGEMENT
+// ============================================================
+function startGame(){
+  $('startMenu').style.display='none';
+  $('endMenu').style.display='none';
+  $('pauseMenu').style.display='none';
+  $('bossHealth').style.display='none';
+  $('bossLabel').style.display='none';
+  showHUD(true);
+  gameState='PLAYING';
+
+  level=createLevel();
+  player=mkPlayer();
+  player.pos=V.copy(level.spawn);
+
+  projs=new Pool(mkProj,o=>{o.life=0;o.pos=[0,-200,0];});
+  eProjs=new Pool(mkEProj,o=>{o.life=0;o.pos=[0,-200,0];});
+  parts=new Pool(mkPart,o=>{o.life=0;o.pos=[0,-200,0];});
+
+  enemies=level.enemies.map(e=>{
+    if(e.type==='crawler')return mkCrawler(e.pos);
+    if(e.type==='shooter')return mkShooter(e.pos);
+    return mkBoss(e.pos);
+  });
+
+  player.yawQ=[0,0,0,1];
+  player.pitch=0;
+  currentFOV=NORM_FOV;
+  pistolCd=0;
+
+  canvas.requestPointerLock();
+  updateHUD();
+}
+
+function resumeGame(){
+  $('pauseMenu').style.display='none';
+  gameState='PLAYING';
+  canvas.requestPointerLock();
+}
+
+function pauseGame(){
+  gameState='PAUSED';
+  $('pauseMenu').style.display='flex';
+  document.exitPointerLock();
+}
+
+function quitMenu(){
+  gameState='MENU';
+  $('pauseMenu').style.display='none';
+  $('startMenu').style.display='flex';
+  showHUD(false);
+  $('bossHealth').style.display='none';
+  $('bossLabel').style.display='none';
+}
+
+function showEnd(win){
+  gameState=win?'VICTORY':'GAMEOVER';
+  document.exitPointerLock();
+  showHUD(false);
+  $('bossHealth').style.display='none';
+  $('bossLabel').style.display='none';
+
+  const e=$('endMenu'),t=$('endTitle'),s=$('endSubtitle');
+  e.style.display='flex';
+  if(win){
+    t.textContent='★ MISSION COMPLETE ★';
+    t.className='menu-title victory';
+    s.innerHTML='Station Omega secured!<br>Kills: '+player.kills+' | HP: '+Math.ceil(Math.max(0,player.hp));
+  }else{
+    t.textContent='✕ MISSION FAILED ✕';
+    t.className='menu-title defeat';
+    s.innerHTML='Eliminated.<br>Kills: '+player.kills;
+  }
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+function onKeyD(e){
+  keys[e.code]=true;
+  if(e.code==='Escape'){
+    if(gameState==='PLAYING')pauseGame();
+    else if(gameState==='PAUSED')resumeGame();
+  }
+}
+function onKeyU(e){keys[e.code]=false;}
+function onMouseD(e){
+  if(gameState!=='PLAYING')return;
+  if(e.button===0)mouseL=true;
+  if(e.button===2)mouseR=true;
+}
+function onMouseU(e){
+  if(e.button===0)mouseL=false;
+  if(e.button===2){mouseR=false;}
+}
+function onMouseM(e){
+  if(gameState!=='PLAYING'||!document.pointerLockElement)return;
+  const dx=e.movementX*MOUSE_SEN;
+  const dy=e.movementY*MOUSE_SEN;
+
+  // Yaw: rotate around Y axis
+  const yq=[0,0,0,1];
+  Q.fromAxisAngle(yq,[0,1,0],-dx);
+  Q.mul(player.yawQ,player.yawQ,yq);
+
+  // Pitch: accumulate angle, clamp
+  player.pitch-=dy;
+  player.pitch=Math.max(-1.55,Math.min(1.55,player.pitch));
+}
+
+// ============================================================
+// WEAPONS
+// ============================================================
+function getLookDir(){
+  const fwd=[0,0,1];
+  // Combine yaw quaternion and pitch
+  const pq=[0,0,0,1];
+  Q.fromAxisAngle(pq,[1,0,0],player.pitch);
+  const full=[0,0,0,1];
+  Q.mul(full,player.yawQ,pq);
+  Q.rotVec(fwd,full,fwd);
+  return fwd;
+}
+
+function firePistol(){
+  if(pistolCd>0||!player.alive)return;
+  pistolCd=PISTOL_CD;
+  const dir=getLookDir();
+  const sp=[player.pos[0],player.pos[1]+player.hgt*0.6,player.pos[2]];
+
+  const p=projs.get();
+  p.isP=true;p.pos=V.copy(sp);p.dir=V.copy(dir);
+  const spd=65;
+  p.vel=[dir[0]*spd,dir[1]*spd,dir[2]*spd];
+  p.dmg=PISTOL_DMG;p.type='b';p.life=3.5;p.rad=0.05;
+  p.kbF=0;p.col=[0,1,0.5];p.emit=0.4;
+}
+
+function fireOrb(){
+  if(player.cannonCd>0||!player.alive)return;
+  player.cannonCd=ORB_CD;
+  const dir=getLookDir();
+  const sp=[player.pos[0],player.pos[1]+player.hgt*0.6,player.pos[2]];
+
+  const p=projs.get();
+  p.isP=true;p.pos=V.copy(sp);p.dir=V.copy(dir);
+  const spd=35;
+  p.vel=[dir[0]*spd,dir[1]*spd,dir[2]*spd];
+  p.dmg=ORB_DMG;p.type='o';p.life=5;p.rad=0.35;
+  p.kbF=ORB_KB;p.col=[1,1,0];p.emit=0.9;
+
+  // Muzzle flash particles
+  for(let i=0;i<8;i++){
+    const pt=parts.get();
+    pt.pos=V.copy(sp);
+    pt.vel=[dir[0]*3+(Math.random()-0.5)*2,dir[1]*3+(Math.random()-0.5)*2,dir[2]*3+(Math.random()-0.5)*2];
+    pt.col=[1,1,0.3];pt.life=0.2+Math.random()*0.2;pt.maxL=pt.life;pt.sz=0.04+Math.random()*0.06;
+  }
+}
+
+function enemyFire(e){
+  if(e.atkCd>0)return;
+  e.atkCd=e.atkMaxCd;
+
+  const dir=V.sub(_t0,player.pos,e.pos);
+  const d=V.len(dir);V.normalize(dir,dir);
+  dir[0]+=(Math.random()-0.5)*(e.type==='boss'?0.08:0.15);
+  dir[1]+=(Math.random()-0.5)*(e.type==='boss'?0.08:0.15);
+  dir[2]+=(Math.random()-0.5)*(e.type==='boss'?0.08:0.15);
+  V.normalize(dir,dir);
+
+  const sp=[e.pos[0],e.pos[1]+e.hgt*0.45,e.pos[2]];
+  const spd=e.type==='boss'?18:22;
+  const dmg=e.atkDmg;
+
+  const p=eProjs.get();
+  p.isP=false;p.pos=V.copy(sp);p.dir=V.copy(dir);
+  p.vel=[dir[0]*spd,dir[1]*spd,dir[2]*spd];
+  p.dmg=dmg;p.type='eb';p.life=4.5;p.rad=0.12;
+  p.kbF=e.type==='boss'?22:6;
+  p.col=e.type==='boss'?[1,0.2,0.1]:[1,0.3,0];
+  p.emit=0.7;
+}
+
+// ============================================================
+// PARTICLES
+// ============================================================
+function hitParts(pos,col,n=10){
+  for(let i=0;i<n;i++){
+    const p=parts.get();
+    p.pos=V.copy(pos);
+    p.vel=[(Math.random()-0.5)*6,Math.random()*6,(Math.random()-0.5)*6];
+    p.col=V.copy(col);p.life=0.25+Math.random()*0.4;
+    p.maxL=p.life;p.sz=0.02+Math.random()*0.06;
+  }
+}
+function deathParts(pos,col,n=25){
+  for(let i=0;i<n;i++){
+    const p=parts.get();
+    p.pos=V.copy(pos);
+    p.vel=[(Math.random()-0.5)*12,Math.random()*12,(Math.random()-0.5)*12];
+    p.col=V.copy(col);p.life=0.4+Math.random()*0.8;
+    p.maxL=p.life;p.sz=0.04+Math.random()*0.12;
+  }
+}
+
+// ============================================================
+// DAMAGE
+// ============================================================
+function dmgPlayer(amt){
+  if(!player.alive||player.invTimer>0)return;
+  player.hp-=amt;
+  player.invTimer=0.25;
+  shakeT=0.2;shakeI=0.06;
+  const f=$('damageFlash');f.style.opacity='1';setTimeout(()=>f.style.opacity='0',120);
+  if(player.hp<=0){
+    player.hp=0;player.alive=false;
+    deathParts(player.pos,[1,0.3,0],50);
+    setTimeout(()=>showEnd(false),1200);
+  }
+}
+
+function dmgEnemy(e,dmg,headshot,kbForce=0){
+  if(!e.alive)return;
+  if(headshot){dmg*=HEADSHOT_MULT;showMessage('★ HEADSHOT ★',800);}
+  e.hp-=dmg;
+  hitParts(e.pos,headshot?[1,1,0]:e.col,headshot?14:7);
+
+  if(kbForce>0){
+    const d=V.sub(_t0,e.pos,player.pos);
+    const dl=V.len(d);
+    if(dl>0){
+      V.normalize(d,d);
+      e.kb=[d[0]*kbForce/e.mass,d[1]*kbForce/e.mass*0.4,d[2]*kbForce/e.mass];
+      e.kbTimer=0.5;
+      e.vel[1]=Math.max(e.vel[1],6);
+    }
+  }
+
+  if(e.hp<=0){
+    e.alive=false;e.hp=0;
+    player.kills++;
+    deathParts(e.pos,e.col,25);
+
+    if(e.type==='boss'){
+      // Dramatic death sequence
+      for(let i=0;i<6;i++){
+        setTimeout(()=>{
+          deathParts([e.pos[0]+(Math.random()-0.5)*4,e.pos[1]+Math.random()*3,e.pos[2]+(Math.random()-0.5)*4],[1,0.4,0],15);
+        },i*250);
+      }
+      showMessage('★ BOSS ELIMINATED ★',2500);
+      setTimeout(()=>showEnd(true),2000);
+    }
+  }
+}
+
+function isHeadshot(e,hp){
+  const hTop=e.pos[1]+e.hgt*0.5;
+  const hBot=e.pos[1]+e.hgt*0.5-e.headH;
+  return hp[1]>=hBot&&hp[1]<=hTop;
+}
+
+// ============================================================
+// PHYSICS
+// ============================================================
+function physicsEnt(e,dt,aabs,isP){
+  if(!e.alive)return;
+  e.vel[1]+=GRAV*dt;
+
+  // Knockback
+  if(e.kbTimer>0){
+    e.kbTimer-=dt;
+    e.vel[0]+=e.kb[0]*dt;e.vel[1]+=e.kb[1]*dt;e.vel[2]+=e.kb[2]*dt;
+    if(e.kbTimer<=0)e.kb=[0,0,0];
+  }
+
+  if(isP){
+    // Movement direction in camera plane
+    const md=[0,0,0];
+    if(keys['KeyW']||keys['ArrowUp'])md[2]++;
+    if(keys['KeyS']||keys['ArrowDown'])md[2]--;
+    if(keys['KeyA']||keys['ArrowLeft'])md[0]--;
+    if(keys['KeyD']||keys['ArrowRight'])md[0]++;
+
+    if(V.lenSq(md)>0){
+      V.normalize(md,md);
+      Q.rotVec(md,player.yawQ,md);
+      md[1]=0;V.normalize(md,md);
+
+      e.vel[0]+=md[0]*PL_ACCEL*dt;
+      e.vel[2]+=md[2]*PL_ACCEL*dt;
+    }else{
+      const df=Math.exp(-PL_DECEL*dt);
+      e.vel[0]*=df;e.vel[2]*=df;
+    }
+
+    // Clamp horizontal speed
+    const hs=Math.sqrt(e.vel[0]*e.vel[0]+e.vel[2]*e.vel[2]);
+    if(hs>PL_SPEED){const s=PL_SPEED/hs;e.vel[0]*=s;e.vel[2]*=s;}
+
+    // Jump
+    if(keys['Space']){
+      keys['Space']=false;
+      if(e.ground){e.vel[1]=JUMP_F;e.ground=false;e.jumps=1;}
+      else if(e.jumps>0){e.vel[1]=DOUBLE_F;e.jumps--;}
+    }
+
+    // Flashlight toggle
+    if(keys['KeyF']){keys['KeyF']=false;}
+
+    // Shooting
+    if(mouseL)firePistol();
+    if(keys['KeyE']){keys['KeyE']=false;fireOrb();}
+  }
+
+  // Air damping (non-player)
+  if(!e.ground&&!isP){
+    e.vel[0]*=Math.pow(0.97,dt*60);
+    e.vel[2]*=Math.pow(0.97,dt*60);
+  }
+
+  // Move
+  e.pos[0]+=e.vel[0]*dt;
+  e.pos[1]+=e.vel[1]*dt;
+  e.pos[2]+=e.vel[2]*dt;
+
+  // Platform collisions
+  e.ground=false;
+  const r=e.rad||0.3,h=e.hgt||1;
+  const eBot=e.pos[1]-h*0.5,eTop=e.pos[1]+h*0.5;
+
+  for(let i=0;i<aabs.length;i++){
+    const a=aabs[i];
+    if(e.pos[0]+r>=a.mi[0]&&e.pos[0]-r<=a.ma[0]&&
+       e.pos[2]+r>=a.mi[2]&&e.pos[2]-r<=a.ma[2]&&
+       eTop>a.mi[1]&&eBot<a.ma[1]){
+
+      // Landing on top
+      if(e.vel[1]<=0&&eBot<=a.ma[1]+0.15){
+        e.pos[1]=a.ma[1]+h*0.5;
+        e.vel[1]=0;e.ground=true;
+        if(isP)e.jumps=2;
+      }
+      // Hitting bottom
+      else if(e.vel[1]>0&&eTop>=a.mi[1]-0.05){
+        e.pos[1]=a.mi[1]-h*0.5;
+        e.vel[1]=0;
+      }
+
+      // Side push
+      const ox1=e.pos[0]+r-a.mi[0],ox2=a.ma[0]-(e.pos[0]-r);
+      const oz1=e.pos[2]+r-a.mi[2],oz2=a.ma[2]-(e.pos[2]-r);
+      const mx=Math.min(ox1,ox2),mz=Math.min(oz1,oz2);
+      if(mx<mz){
+        if(ox1<ox2)e.pos[0]=a.mi[0]-r;else e.pos[0]=a.ma[0]+r;
+        e.vel[0]=0;
+      }else{
+        if(oz1<oz2)e.pos[2]=a.mi[2]-r;else e.pos[2]=a.ma[2]+r;
+        e.vel[2]=0;
+      }
+    }
+  }
+
+  // Fall death
+  if(e.pos[1]<-30){
+    if(isP){player.hp=0;player.alive=false;deathParts(player.pos,[1,0.3,0],40);setTimeout(()=>showEnd(false),1000);}
+    else{e.alive=false;e.hp=0;}
+  }
+}
+
+// ============================================================
+// ENEMY AI
+// ============================================================
+function aiUpdate(e,dt){
+  if(!e.alive||!player.alive)return;
+  e.atkCd=Math.max(0,(e.atkCd||0)-dt);
+  e.aiT-=dt;
+
+  const d=V.dist(e.pos,player.pos);
+  if(d<e.aggroRng)e.ai='chase';
+
+  if(e.ai==='patrol'){
+    if(!e.ptgt||e.aiT<=0){
+      e.ptgt=[e.spawn[0]+(Math.random()-0.5)*7,e.spawn[1],e.spawn[2]+(Math.random()-0.5)*7];
+      e.aiT=3+Math.random()*4;
+    }
+    const t=V.sub(_t0,e.ptgt,e.pos);const dl=V.len(t);
+    if(dl>0.5){V.normalize(t,t);e.vel[0]+=t[0]*e.speed*2*dt;e.vel[2]+=t[2]*e.speed*2*dt;}
+  }else{
+    const t=V.sub(_t0,player.pos,e.pos);
+    const dl=V.len(t);V.normalize(t,t);
+
+    if(dl>e.atkRng*0.6){
+      e.vel[0]+=t[0]*e.speed*3*dt;
+      e.vel[2]+=t[2]*e.speed*3*dt;
+    }
+
+    if(dl<=e.atkRng){
+      e.atkCd-=dt;
+      if(e.atkCd<=0){
+        if(e.type==='crawler'){
+          dmgPlayer(e.atkDmg);
+          e.atkCd=e.atkMaxCd;
+        }else{
+          enemyFire(e);
+        }
+      }
+    }
+
+    // Boss charge at low health
+    if(e.type==='boss'){
+      e.chargeCd=(e.chargeCd||0)-dt;
+      if(e.hp<e.maxHp*0.3&&e.chargeCd<=0){
+        e.vel[0]+=t[0]*20;e.vel[1]=10;e.vel[2]+=t[2]*20;
+        e.chargeCd=5;
+      }
+      // Boss pushes other enemies
+      for(const o of enemies){
+        if(o===e||!o.alive)continue;
+        const od=V.dist(e.pos,o.pos);
+        if(od<3.5){
+          const pd=V.sub(_t0,o.pos,e.pos);V.normalize(pd,pd);
+          o.vel[0]+=pd[0]*25;o.vel[1]+=6;o.vel[2]+=pd[2]*25;
+        }
+      }
+      // Boss phases
+      if(e.hp<e.maxHp*0.6)e.phase=2;
+      if(e.hp<e.maxHp*0.3)e.phase=3;
+    }
+  }
+
+  // Clamp speed
+  const hs=Math.sqrt(e.vel[0]*e.vel[0]+e.vel[2]*e.vel[2]);
+  if(hs>e.speed){const s=e.speed/hs;e.vel[0]*=s;e.vel[2]*=s;}
+}
+
+// ============================================================
+// UPDATE
+// ============================================================
+function update(dt){
+  if(gameState!=='PLAYING')return;
+  dt=Math.min(dt,0.05);
+
+  pistolCd=Math.max(0,pistolCd-dt);
+  player.cannonCd=Math.max(0,player.cannonCd-dt);
+  player.invTimer=Math.max(0,player.invTimer-dt);
+
+  // FOV zoom
+  const targetFOV=mouseR?ZOOM_FOV:NORM_FOV;
+  currentFOV+=(targetFOV-currentFOV)*dt*10;
+
+  // Message timer
+  if(msgTimer>0){
+    msgTimer-=dt*1000;
+    if(msgTimer<=0)$('msgOverlay').style.display='none';
+  }
+
+  // Player physics
+  physicsEnt(player,dt,level.aabs,true);
+
+  // Enemies
+  for(const e of enemies){
+    if(!e.alive)continue;
+    aiUpdate(e,dt);
+    physicsEnt(e,dt,level.aabs,false);
+  }
+
+  // Player projectiles
+  for(let i=projs.active.length-1;i>=0;i--){
+    const p=projs.active[i];
+    p.life-=dt;
+    p.pos[0]+=p.vel[0]*dt;p.pos[1]+=p.vel[1]*dt;p.pos[2]+=p.vel[2]*dt;
+
+    let dead=false;
+    // Hit platforms
+    for(const a of level.aabs){
+      if(a.pt(p.pos[0],p.pos[1],p.pos[2])){hitParts(p.pos,[0.5,0.5,0.5],4);dead=true;break;}
+    }
+    if(!dead&&p.isP){
+      // Hit enemies
+      for(const e of enemies){
+        if(!e.alive)continue;
+        if(V.distSq(p.pos,e.pos)<(e.rad+p.rad)*(e.rad+p.rad)){
+          dmgEnemy(e,p.dmg,isHeadshot(e,p.pos),p.kbF);
+          dead=true;break;
+        }
+      }
+    }
+    if(!dead&&!p.isP){
+      // Hit player
+      if(V.distSq(p.pos,player.pos)<(player.rad+p.rad)*(player.rad+p.rad)){
+        dmgPlayer(p.dmg);
+        if(p.kbF>0){
+          const d=V.sub(_t0,player.pos,p.pos);const dl=V.len(d);
+          if(dl>0){V.normalize(d,d);player.kb=[d[0]*p.kbF/PL_MASS,d[1]*p.kbF/PL_MASS,d[2]*p.kbF/PL_MASS];player.kbTimer=0.3;}
+        }
+        dead=true;
+      }
+    }
+    if(dead||p.life<=0||V.lenSq(p.pos)>25000)projs.put(p);
+  }
+
+  // Enemy projectiles
+  for(let i=eProjs.active.length-1;i>=0;i--){
+    const p=eProjs.active[i];
+    p.life-=dt;
+    p.pos[0]+=p.vel[0]*dt;p.pos[1]+=p.vel[1]*dt;p.pos[2]+=p.vel[2]*dt;
+
+    let dead=false;
+    for(const a of level.aabs){
+      if(a.pt(p.pos[0],p.pos[1],p.pos[2])){hitParts(p.pos,[0.7,0.25,0.1],4);dead=true;break;}
+    }
+    if(!dead&&V.distSq(p.pos,player.pos)<(player.rad+p.rad)*(player.rad+p.rad)){
+      dmgPlayer(p.dmg);dead=true;
+      if(p.kbF>0){
+        const d=V.sub(_t0,player.pos,p.pos);const dl=V.len(d);
+        if(dl>0){V.normalize(d,d);player.kb=[d[0]*p.kbF/PL_MASS,d[1]*p.kbF/PL_MASS,d[2]*p.kbF/PL_MASS];player.kbTimer=0.3;}
+      }
+    }
+    if(dead||p.life<=0||V.lenSq(p.pos)>25000)eProjs.put(p);
+  }
+
+  // Particles
+  for(let i=parts.active.length-1;i>=0;i--){
+    const p=parts.active[i];
+    p.life-=dt;p.vel[1]+=GRAV*0.3*dt;
+    p.pos[0]+=p.vel[0]*dt;p.pos[1]+=p.vel[1]*dt;p.pos[2]+=p.vel[2]*dt;
+    if(p.life<=0)parts.put(p);
+  }
+
+  shakeT=Math.max(0,shakeT-dt);
+  updateHUD();
+}
+
+// ============================================================
+// HUD UPDATE
+// ============================================================
+function updateHUD(){
+  const hp=Math.max(0,player.hp);
+  $('healthFill').style.width=(hp/player.maxHp*100)+'%';
+  $('healthText').textContent='HP: '+Math.ceil(hp)+' / '+player.maxHp;
+  $('killCount').textContent='Kills: '+player.kills;
+  $('jumpIndicator').textContent='Jumps: '+(player.ground?2:player.jumps)+' / 2';
+
+  const boss=enemies.find(e=>e.type==='boss'&&e.alive);
+  if(boss){
+    $('bossHealth').style.display='block';
+    $('bossLabel').style.display='block';
+    $('bossHealthFill').style.width=Math.max(0,boss.hp/boss.maxHp*100)+'%';
+  }else{
+    const db=enemies.find(e=>e.type==='boss');
+    if(db&&!db.alive){$('bossHealth').style.display='none';$('bossLabel').style.display='none';}
+  }
+
+  const cdPct=player.cannonCd>0?(1-player.cannonCd/ORB_CD)*100:100;
+  $('cooldownFill').style.width=cdPct+'%';
+  $('propLabel').style.color=player.cannonCd>0?'#fa0':'#ff0';
+  $('propLabel').textContent=player.cannonCd>0?
+    'PROPEL CANNON ['+player.cannonCd.toFixed(1)+'s]':'PROPEL CANNON [E] READY';
+
+  // Sector indicator
+  let np=0,nd=1e9;
+  for(let i=0;i<level.plats.length;i++){
+    const d=V.distSq(player.pos,level.plats[i].pos);
+    if(d<nd){nd=d;np=i;}
+  }
+  const lv=$('levelIndicator');
+  if(np===6)lv.textContent='⚠ BOSS ARENA ⚠';
+  else if(np>=4)lv.textContent='SECTOR C — ADVANCED COMBAT';
+  else if(np>=2)lv.textContent='SECTOR B — BRIDGE';
+  else lv.textContent='SECTOR A — STATION ALPHA';
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+function render(){
+  renderer.clear();
+  if(!player)return;
+
+  const cp=[player.pos[0],player.pos[1]+player.hgt*0.65,player.pos[2]];
+  if(shakeT>0){
+    cp[0]+=(Math.random()-0.5)*shakeI*2;
+    cp[1]+=(Math.random()-0.5)*shakeI*2;
+  }
+
+  // Camera direction from yaw quaternion + pitch
+  const fwd=[0,0,1];
+  const pq=[0,0,0,1];
+  Q.fromAxisAngle(pq,[1,0,0],player.pitch);
+  const full=[0,0,0,1];
+  Q.mul(full,player.yawQ,pq);
+  Q.rotVec(fwd,full,fwd);
+
+  const look=[cp[0]+fwd[0],cp[1]+fwd[1],cp[2]+fwd[2]];
+  M4.lookAt(viewMat,cp,look,[0,1,0]);
+
+  const asp=renderer.c.width/renderer.c.height;
+  M4.perspective(projMat,currentFOV,asp,0.1,500);
+  M4.mul(vpMat,projMat,viewMat);
+
+  // Platforms
+  for(const p of level.plats){
+    mdlMat=M4.id();
+    M4.translate(mdlMat,mdlMat,p.pos[0],p.pos[1],p.pos[2]);
+    M4.scale(mdlMat,mdlMat,p.size[0],p.size[1],p.size[2]);
+    M4.mul(mvpMat,vpMat,mdlMat);
+    renderer.draw(mdlMat,mvpMat,p.color,0,cp);
+  }
+
+  // Enemies
+  for(const e of enemies){
+    if(!e.alive)continue;
+    // Body
+    mdlMat=M4.id();
+    M4.translate(mdlMat,mdlMat,e.pos[0],e.pos[1]-e.hgt*0.15,e.pos[2]);
+    M4.scale(mdlMat,mdlMat,e.rad*2,e.hgt*0.65,e.rad*2);
+    M4.mul(mvpMat,vpMat,mdlMat);
+    renderer.draw(mdlMat,mvpMat,e.col,0,cp);
+    // Head (glowing)
+    mdlMat=M4.id();
+    M4.translate(mdlMat,mdlMat,e.pos[0],e.pos[1]+e.hgt*0.35,e.pos[2]);
+    M4.scale(mdlMat,mdlMat,e.rad*1.5,e.headH*0.45,e.rad*1.5);
+    M4.mul(mvpMat,vpMat,mdlMat);
+    renderer.draw(mdlMat,mvpMat,e.hcol,0.35,cp);
+  }
+
+  // Projectiles
+  for(const p of projs.active){
+    mdlMat=M4.id();
+    M4.translate(mdlMat,mdlMat,p.pos[0],p.pos[1],p.pos[2]);
+    const s=p.rad*2;
+    M4.scale(mdlMat,mdlMat,s,s,s);
+    M4.mul(mvpMat,vpMat,mdlMat);
+    renderer.draw(mdlMat,mvpMat,p.col,p.emit,cp);
+  }
+  for(const p of eProjs.active){
+    mdlMat=M4.id();
+    M4.translate(mdlMat,mdlMat,p.pos[0],p.pos[1],p.pos[2]);
+    const s=p.rad*2;
+    M4.scale(mdlMat,mdlMat,s,s,s);
+    M4.mul(mvpMat,vpMat,mdlMat);
+    renderer.draw(mdlMat,mvpMat,p.col,p.emit,cp);
+  }
+
+  // Particles
+  for(const p of parts.active){
+    const a=Math.max(0,p.life/p.maxL);
+    mdlMat=M4.id();
+    M4.translate(mdlMat,mdlMat,p.pos[0],p.pos[1],p.pos[2]);
+    const s=p.sz*a;
+    M4.scale(mdlMat,mdlMat,s,s,s);
+    M4.mul(mvpMat,vpMat,mdlMat);
+    const c=[p.col[0]*a+p.col[0]*0.4,p.col[1]*a+p.col[1]*0.4,p.col[2]*a+p.col[2]*0.4];
+    renderer.draw(mdlMat,mvpMat,c,0.5,cp);
+  }
+
+  // Stars
+  const t=performance.now()*0.001;
+  for(const s of stars){
+    const tw=0.5+0.5*Math.sin(t*s.tw+s.ph);
+    const b=s.b*tw;
+    mdlMat=M4.id();
+    M4.translate(mdlMat,mdlMat,s.x,s.y,s.z);
+    const sz=s.sz;
+    M4.scale(mdlMat,mdlMat,sz,sz,sz);
+    M4.mul(mvpMat,vpMat,mdlMat);
+    renderer.draw(mdlMat,mvpMat,[b*0.9,b*0.9,b*1.1],1,cp);
+  }
+
+  // Minimap
+  renderMinimap();
+}
+
+function renderMinimap(){
+  const ctx=mmpCtx,w=160,h=160;
+  ctx.fillStyle='rgba(5,10,15,0.9)';
+  ctx.fillRect(0,0,w,h);
+
+  const sc=0.55,cx=w/2,cy=h/2;
+
+  // Platforms
+  for(const p of level.plats){
+    const px=cx+(p.pos[0]-player.pos[0])*sc;
+    const py=cy+(p.pos[2]-player.pos[2])*sc;
+    const pw=p.size[0]*sc,ph=p.size[2]*sc;
+    // Height-based color: higher = brighter cyan
+    const brightness=Math.min(1,0.3+p.pos[1]/25);
+    const r=Math.floor(20+30*brightness);
+    const g=Math.floor(120+100*brightness);
+    const b=Math.floor(80+120*brightness);
+    ctx.fillStyle=`rgba(${r},${g},${b},0.7)`;
+    ctx.fillRect(px-pw/2,py-ph/2,pw,ph);
+    // Platform border
+    ctx.strokeStyle=`rgba(${r+40},${g+40},${b+40},0.3)`;
+    ctx.lineWidth=0.5;
+    ctx.strokeRect(px-pw/2,py-ph/2,pw,ph);
+  }
+
+  // Enemies
+  for(const e of enemies){
+    if(!e.alive)continue;
+    const px=cx+(e.pos[0]-player.pos[0])*sc;
+    const py=cy+(e.pos[2]-player.pos[2])*sc;
+    ctx.fillStyle=e.type==='boss'?'#ff3333':e.type==='shooter'?'#3399ff':'#ff9933';
+    ctx.beginPath();ctx.arc(px,py,e.type==='boss'?5:3,0,6.283);ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.5)';ctx.lineWidth=0.8;
+    ctx.beginPath();ctx.arc(px,py,e.type==='boss'?5:3,0,6.283);ctx.stroke();
+  }
+
+  // Player (center)
+  ctx.fillStyle='#00ff44';
+  ctx.beginPath();ctx.arc(cx,cy,3.5,0,6.283);ctx.fill();
+  ctx.strokeStyle='#ffffff';ctx.lineWidth=1;
+  ctx.beginPath();ctx.arc(cx,cy,3.5,0,6.283);ctx.stroke();
+
+  // Direction
+  const fwd=[0,0,1];
+  const pq=[0,0,0,1];
+  Q.fromAxisAngle(pq,[1,0,0],player.pitch);
+  const full=[0,0,0,1];
+  Q.mul(full,player.yawQ,pq);
+  Q.rotVec(fwd,full,fwd);
+  ctx.strokeStyle='#00ff44';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(cx,cy);
+  ctx.lineTo(cx+fwd[0]*14,cy+fwd[2]*14);ctx.stroke();
+
+  ctx.strokeStyle='rgba(0,255,0,0.35)';ctx.lineWidth=1;
+  ctx.strokeRect(0,0,w,h);
+}
+
+// ============================================================
+// GAME LOOP (target 60fps)
+// ============================================================
+let lastT=0;
+function loop(ts){
+  const dt=Math.min((ts-lastT)/1000,0.05);
+  lastT=ts;
+
+  if(gameState==='PLAYING')update(dt);
+  if(gameState==='PLAYING'||gameState==='PAUSED')render();
+
+  requestAnimationFrame(loop);
+}
+
+// ============================================================
+// START
+// ============================================================
+init();
+</script>
+</body>
+</html>
