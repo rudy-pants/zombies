@@ -136,7 +136,14 @@ const M4 = {
   id:()=>new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]),
   copy:(o,m)=>{for(let i=0;i<16;i++)o[i]=m[i];return o;},
   mul:(o,a,b)=>{
-    for(let i=0;i<4;i++)for(let j=0;j<4;j++){o[i*4+j]=0;for(let k=0;k<4;k++)o[i*4+j]+=a[k*4+j]*b[i*4+k]}return o;
+    // Accumulate into a temp to avoid corrupting 'a' when o === a
+    // (in-place calls like translate(mdlMat, mdlMat, ...) would zero out
+    //  diagonal elements of the identity before they are read)
+    const r=new Float32Array(16);
+    for(let i=0;i<4;i++)for(let j=0;j<4;j++){
+        for(let k=0;k<4;k++) r[i*4+j]+=a[k*4+j]*b[i*4+k];
+    }
+    for(let i=0;i<16;i++) o[i]=r[i];return o;
   },
   translate:(o,m,x,y,z)=>{
     const t=new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,x,y,z,1]);return M4.mul(o,m,t);
