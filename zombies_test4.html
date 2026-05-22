@@ -615,7 +615,7 @@ function onMouseM(e){
   Q.mul(player.yawQ,player.yawQ,yq);
 
   // Pitch: accumulate angle, clamp
-  player.pitch-=dy;
+  player.pitch+=dy;
   player.pitch=Math.max(-1.55,Math.min(1.55,player.pitch));
 }
 

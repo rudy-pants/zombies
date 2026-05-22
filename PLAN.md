@@ -4,12 +4,22 @@ General information: zombies_test4.md
 
 # Issues
 
-- [ ] Inverted WASD and aim controls: The player should move forward with W, and backwards with S. Moving the mouse forward should make the player look upwards, and pulling the mouse back should make the player look down.
+- [x] Inverted WASD and aim controls: The player should move forward with W, and backwards with S. Moving the mouse forward should make the player look upwards, and pulling the mouse back should make the player look down.
 - [x] Floor collisions: Player falls through the floor occasionally, sometimes after moving through WASD. Additionally, bullets seem to travel through the floor as well. This should not happen.
 - [ ] Air jump fix: The player should be able to jump once while on a platform, and once in the air. Currently, the first jump can happen whether or not the player is on a platform.
 - [ ] Performance checks: The game lags occasionally. Think of places where performance might be addressed, and attempt fixes
 
 # Discussion
+
+### Inverted WASD and aim controls fix (completed)
+
+The root cause was a sign error in the mouse pitch calculation inside `onMouseM`. The code read `player.pitch -= dy` where `dy = e.movementY * MOUSE_SEN`. Since `movementY` is negative when the mouse moves toward the top of the screen (forward), subtracting a negative value made pitch positive. In the game's quaternion-based camera system (forward vector [0,0,1], right-handed coordinate system), a positive pitch angle rotates the camera **downward** — the opposite of what the player expects.
+
+**Fix:** Changed `player.pitch -= dy` to `player.pitch += dy`. Now:
+- Mouse forward (top of screen, `movementY < 0`) → pitch decreases (negative) → camera looks **up** ✓
+- Mouse backward (bottom of screen, `movementY > 0`) → pitch increases (positive) → camera looks **down** ✓
+
+WASD movement was verified correct: `KeyW` maps to +Z (forward), which is rotated by the yaw quaternion to produce proper camera-relative movement in all orientations.
 
 ### Floor collisions fix (completed)
 
