@@ -635,7 +635,8 @@ function onMouseM(e){
 // ============================================================
 function getLookDir(){
   // Combine yaw quaternion and pitch (reuse temp buffers)
-  const fwd=_t0,pq=_t1,full=_t2;
+  // Initialize fwd to forward axis — _t0 is a shared temp used by V.sub elsewhere
+  const fwd=[0,0,1],pq=_t1,full=_t2;
   Q.fromAxisAngle(pq,[1,0,0],player.pitch);
   Q.mul(full,player.yawQ,pq);
   Q.rotVec(fwd,full,fwd);
@@ -800,8 +801,8 @@ function physicsEnt(e,dt,aabs,isP){
     const md=[0,0,0];
     if(keys['KeyW']||keys['ArrowUp'])md[2]++;
     if(keys['KeyS']||keys['ArrowDown'])md[2]--;
-    if(keys['KeyA']||keys['ArrowLeft'])md[0]--;
-    if(keys['KeyD']||keys['ArrowRight'])md[0]++;
+    if(keys['KeyA']||keys['ArrowLeft'])md[0]++;
+    if(keys['KeyD']||keys['ArrowRight'])md[0]--;
 
     if(V.lenSq(md)>0){
       V.normalize(md,md);
@@ -1127,7 +1128,8 @@ function render(){
   }
 
   // Camera direction from yaw quaternion + pitch (reuse temp buffers)
-  const fwd=_t0,pq=_t1,full=_t2;
+  // Initialize fwd to forward axis — _t0 is a shared temp used by V.sub in update()
+  const fwd=[0,0,1],pq=_t1,full=_t2;
   Q.fromAxisAngle(pq,[1,0,0],player.pitch);
   Q.mul(full,player.yawQ,pq);
   Q.rotVec(fwd,full,fwd);
@@ -1254,8 +1256,8 @@ function renderMinimap(){
   ctx.strokeStyle='#ffffff';ctx.lineWidth=1;
   ctx.beginPath();ctx.arc(cx,cy,3.5,0,6.283);ctx.stroke();
 
-  // Direction (reuse temp buffers)
-  const fwd=_t0,pq=_t1,full=_t2;
+  // Direction
+  const fwd=[0,0,1],pq=_t1,full=_t2;
   Q.fromAxisAngle(pq,[1,0,0],player.pitch);
   Q.mul(full,player.yawQ,pq);
   Q.rotVec(fwd,full,fwd);
