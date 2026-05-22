@@ -831,15 +831,23 @@ function physicsEnt(e,dt,aabs,isP){
     e.vel[2]*=Math.pow(0.97,dt*60);
   }
 
+  // Save previous Y for swept collision detection (prevents tunneling through platforms)
+  const prevY=e.pos[1];
+
   // Move
   e.pos[0]+=e.vel[0]*dt;
   e.pos[1]+=e.vel[1]*dt;
   e.pos[2]+=e.vel[2]*dt;
 
-  // Platform collisions
+  // Platform collisions (swept — uses prev position to detect tunneling)
   e.ground=false;
   const r=e.rad||0.3,h=e.hgt||1;
   const eBot=e.pos[1]-h*0.5,eTop=e.pos[1]+h*0.5;
+  const prevBot=prevY-h*0.5;
+  // Dynamic tolerance: account for max vertical travel this frame so fast-moving
+  // entities can't tunnel through thin platforms
+  const yTravel=Math.abs(e.pos[1]-prevY);
+  const tol=Math.max(0.12,yTravel+0.05);
 
   for(let i=0;i<aabs.length;i++){
     const a=aabs[i];
@@ -847,28 +855,31 @@ function physicsEnt(e,dt,aabs,isP){
        e.pos[2]+r>=a.mi[2]&&e.pos[2]-r<=a.ma[2]&&
        eTop>a.mi[1]&&eBot<a.ma[1]){
 
-      // Landing on top
-      if(e.vel[1]<=0&&eBot<=a.ma[1]+0.15){
+      // Landing on top — check both current position (with dynamic tolerance)
+      // and previous position (swept detection) so entities that tunnel through
+      // the surface between frames are still caught
+      if(e.vel[1]<=0&&(eBot<=a.ma[1]+tol||prevBot<=a.ma[1]+0.01)){
         e.pos[1]=a.ma[1]+h*0.5;
         e.vel[1]=0;e.ground=true;
         if(isP)e.jumps=2;
       }
       // Hitting bottom
-      else if(e.vel[1]>0&&eTop>=a.mi[1]-0.05){
+      else if(e.vel[1]>0&&(eTop>=a.mi[1]-tol||eTop>=a.mi[1]-0.01)){
         e.pos[1]=a.mi[1]-h*0.5;
         e.vel[1]=0;
       }
-
-      // Side push
-      const ox1=e.pos[0]+r-a.mi[0],ox2=a.ma[0]-(e.pos[0]-r);
-      const oz1=e.pos[2]+r-a.mi[2],oz2=a.ma[2]-(e.pos[2]-r);
-      const mx=Math.min(ox1,ox2),mz=Math.min(oz1,oz2);
-      if(mx<mz){
-        if(ox1<ox2)e.pos[0]=a.mi[0]-r;else e.pos[0]=a.ma[0]+r;
-        e.vel[0]=0;
-      }else{
-        if(oz1<oz2)e.pos[2]=a.mi[2]-r;else e.pos[2]=a.ma[2]+r;
-        e.vel[2]=0;
+      // Side push — only when vertical resolution did NOT apply
+      else{
+        const ox1=e.pos[0]+r-a.mi[0],ox2=a.ma[0]-(e.pos[0]-r);
+        const oz1=e.pos[2]+r-a.mi[2],oz2=a.ma[2]-(e.pos[2]-r);
+        const mx=Math.min(ox1,ox2),mz=Math.min(oz1,oz2);
+        if(mx<mz){
+          if(ox1<ox2)e.pos[0]=a.mi[0]-r;else e.pos[0]=a.ma[0]+r;
+          e.vel[0]=0;
+        }else{
+          if(oz1<oz2)e.pos[2]=a.mi[2]-r;else e.pos[2]=a.ma[2]+r;
+          e.vel[2]=0;
+        }
       }
     }
   }
@@ -977,56 +988,66 @@ function update(dt){
     physicsEnt(e,dt,level.aabs,false);
   }
 
-  // Player projectiles
+  // Player projectiles (sub-stepped to prevent tunneling through thin platforms)
   for(let i=projs.active.length-1;i>=0;i--){
     const p=projs.active[i];
     p.life-=dt;
-    p.pos[0]+=p.vel[0]*dt;p.pos[1]+=p.vel[1]*dt;p.pos[2]+=p.vel[2]*dt;
-
+    // Divide movement into sub-steps so fast projectiles can't pass through platforms
+    const spd=V.len(p.vel);
+    const steps=Math.max(1,Math.ceil(spd*dt/0.25));
+    const sdt=dt/steps;
     let dead=false;
-    // Hit platforms
-    for(const a of level.aabs){
-      if(a.pt(p.pos[0],p.pos[1],p.pos[2])){hitParts(p.pos,[0.5,0.5,0.5],4);dead=true;break;}
-    }
-    if(!dead&&p.isP){
-      // Hit enemies
-      for(const e of enemies){
-        if(!e.alive)continue;
-        if(V.distSq(p.pos,e.pos)<(e.rad+p.rad)*(e.rad+p.rad)){
-          dmgEnemy(e,p.dmg,isHeadshot(e,p.pos),p.kbF);
-          dead=true;break;
+    for(let s=0;s<steps&&!dead;s++){
+      p.pos[0]+=p.vel[0]*sdt;p.pos[1]+=p.vel[1]*sdt;p.pos[2]+=p.vel[2]*sdt;
+      // Hit platforms
+      for(const a of level.aabs){
+        if(a.pt(p.pos[0],p.pos[1],p.pos[2])){hitParts(p.pos,[0.5,0.5,0.5],4);dead=true;break;}
+      }
+      if(dead)continue;
+      if(p.isP){
+        // Hit enemies
+        for(const e of enemies){
+          if(!e.alive)continue;
+          if(V.distSq(p.pos,e.pos)<(e.rad+p.rad)*(e.rad+p.rad)){
+            dmgEnemy(e,p.dmg,isHeadshot(e,p.pos),p.kbF);
+            dead=true;break;
+          }
         }
       }
-    }
-    if(!dead&&!p.isP){
-      // Hit player
-      if(V.distSq(p.pos,player.pos)<(player.rad+p.rad)*(player.rad+p.rad)){
-        dmgPlayer(p.dmg);
-        if(p.kbF>0){
-          const d=V.sub(_t0,player.pos,p.pos);const dl=V.len(d);
-          if(dl>0){V.normalize(d,d);player.kb=[d[0]*p.kbF/PL_MASS,d[1]*p.kbF/PL_MASS,d[2]*p.kbF/PL_MASS];player.kbTimer=0.3;}
+      if(!dead&&!p.isP){
+        // Hit player
+        if(V.distSq(p.pos,player.pos)<(player.rad+p.rad)*(player.rad+p.rad)){
+          dmgPlayer(p.dmg);
+          if(p.kbF>0){
+            const d=V.sub(_t0,player.pos,p.pos);const dl=V.len(d);
+            if(dl>0){V.normalize(d,d);player.kb=[d[0]*p.kbF/PL_MASS,d[1]*p.kbF/PL_MASS,d[2]*p.kbF/PL_MASS];player.kbTimer=0.3;}
+          }
+          dead=true;
         }
-        dead=true;
       }
     }
     if(dead||p.life<=0||V.lenSq(p.pos)>25000)projs.put(p);
   }
 
-  // Enemy projectiles
+  // Enemy projectiles (sub-stepped)
   for(let i=eProjs.active.length-1;i>=0;i--){
     const p=eProjs.active[i];
     p.life-=dt;
-    p.pos[0]+=p.vel[0]*dt;p.pos[1]+=p.vel[1]*dt;p.pos[2]+=p.vel[2]*dt;
-
+    const spd=V.len(p.vel);
+    const steps=Math.max(1,Math.ceil(spd*dt/0.25));
+    const sdt=dt/steps;
     let dead=false;
-    for(const a of level.aabs){
-      if(a.pt(p.pos[0],p.pos[1],p.pos[2])){hitParts(p.pos,[0.7,0.25,0.1],4);dead=true;break;}
-    }
-    if(!dead&&V.distSq(p.pos,player.pos)<(player.rad+p.rad)*(player.rad+p.rad)){
-      dmgPlayer(p.dmg);dead=true;
-      if(p.kbF>0){
-        const d=V.sub(_t0,player.pos,p.pos);const dl=V.len(d);
-        if(dl>0){V.normalize(d,d);player.kb=[d[0]*p.kbF/PL_MASS,d[1]*p.kbF/PL_MASS,d[2]*p.kbF/PL_MASS];player.kbTimer=0.3;}
+    for(let s=0;s<steps&&!dead;s++){
+      p.pos[0]+=p.vel[0]*sdt;p.pos[1]+=p.vel[1]*sdt;p.pos[2]+=p.vel[2]*sdt;
+      for(const a of level.aabs){
+        if(a.pt(p.pos[0],p.pos[1],p.pos[2])){hitParts(p.pos,[0.7,0.25,0.1],4);dead=true;break;}
+      }
+      if(!dead&&V.distSq(p.pos,player.pos)<(player.rad+p.rad)*(player.rad+p.rad)){
+        dmgPlayer(p.dmg);dead=true;
+        if(p.kbF>0){
+          const d=V.sub(_t0,player.pos,p.pos);const dl=V.len(d);
+          if(dl>0){V.normalize(d,d);player.kb=[d[0]*p.kbF/PL_MASS,d[1]*p.kbF/PL_MASS,d[2]*p.kbF/PL_MASS];player.kbTimer=0.3;}
+        }
       }
     }
     if(dead||p.life<=0||V.lenSq(p.pos)>25000)eProjs.put(p);
