@@ -7,7 +7,7 @@ General information: zombies_test4.md
 - [x] Inverted WASD and aim controls: The player should move forward with W, and backwards with S. Moving the mouse forward should make the player look upwards, and pulling the mouse back should make the player look down.
 - [x] Floor collisions: Player falls through the floor occasionally, sometimes after moving through WASD. Additionally, bullets seem to travel through the floor as well. This should not happen.
 - [x] Air jump fix: The player should be able to jump once while on a platform, and once in the air. Currently, the first jump can happen whether or not the player is on a platform.
-- [ ] Performance checks: The game lags occasionally. Think of places where performance might be addressed, and attempt fixes
+- [x] Performance checks: The game lags occasionally. Think of places where performance might be addressed, and attempt fixes
 
 # Discussion
 
@@ -45,3 +45,21 @@ The game's spawn position (`y=2.5`) is above the starting platform surface (`y=0
 3. First jump (grounded) → uses `JUMP_F` (10), sets `jumps=1` ✓
 4. Second jump (airborne) → uses `DOUBLE_F` (8), sets `jumps=0` ✓
 5. Further jump attempts → `ground=false`, `jumps=0` → **blocked** ✓
+
+### Performance optimization (completed)
+
+Multiple sources of per-frame garbage collection pressure were identified in the render loop, which is called every frame (~60 times/sec). The game renders platforms (~30), enemies (up to 14 with 2 draw calls each), projectiles, particles, and **1000 stars** — each requiring matrix operations that previously allocated new `Float32Array` objects.
+
+**Root causes and fixes:**
+
+1. **`M4.mul()` allocated `new Float32Array(16)` every call** — This is the innermost operation of every draw call's model-view-projection matrix computation. With ~130+ draw calls per frame (30 platforms + 28 enemy draws + 1000 stars + projectiles + particles), this generated ~1300+ 128-byte allocations per frame. Fixed by using a pre-allocated `_m4tmp` buffer as the accumulator.
+
+2. **`M4.translate()` and `M4.scale()` each allocated a temporary matrix** — Two more allocations per draw call (3 per entity total). Fixed by pre-allocating `_m4trans` and `_m4scale` and reusing them via direct index assignment instead of `new Float32Array([..])`.
+
+3. **`mdlMat = M4.id()` leaked the old model matrix** — Each draw call in `render()` assigned `mdlMat = M4.id()`, which created a *new* `Float32Array(16)` via the default parameter. The old matrix became garbage. Fixed by calling `M4.id(mdlMat)` which mutates the existing buffer in-place via `o.fill(0)` + diagonal set.
+
+4. **Quaternion allocations in `render()` camera setup** — Every frame allocated 3 arrays (`fwd`, `pq`, `full`) for camera direction computation. Fixed by reusing the shared temp arrays `_t0`, `_t1`, `_t2`.
+
+5. **Same quaternion pattern in `getLookDir()` and `renderMinimap()`** — Each fired shot and minimap render allocated 3 arrays. Fixed similarly with temp buffer reuse.
+
+**Impact:** Eliminated ~4000+ per-frame allocations (4 per draw call × ~1300 draw calls). This removes the primary GC pressure source, which was causing stop-the-world pauses and visible frame hitches.

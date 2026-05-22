@@ -132,24 +132,35 @@ const Q = {
   }
 };
 
+const _m4tmp=new Float32Array(16);
+const _m4trans=new Float32Array(16);
+const _m4scale=new Float32Array(16);
+
 const M4 = {
-  id:()=>new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]),
+  id:(o=new Float32Array(16))=>{o.fill(0);o[0]=o[5]=o[10]=o[15]=1;return o;},
   copy:(o,m)=>{for(let i=0;i<16;i++)o[i]=m[i];return o;},
   mul:(o,a,b)=>{
     // Accumulate into a temp to avoid corrupting 'a' when o === a
     // (in-place calls like translate(mdlMat, mdlMat, ...) would zero out
     //  diagonal elements of the identity before they are read)
-    const r=new Float32Array(16);
+    // Reuse _m4tmp to avoid per-call Float32Array allocation
+    const r=_m4tmp;
+    for(let i=0;i<16;i++) r[i]=0;
     for(let i=0;i<4;i++)for(let j=0;j<4;j++){
         for(let k=0;k<4;k++) r[i*4+j]+=a[k*4+j]*b[i*4+k];
     }
     for(let i=0;i<16;i++) o[i]=r[i];return o;
   },
   translate:(o,m,x,y,z)=>{
-    const t=new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,x,y,z,1]);return M4.mul(o,m,t);
+    _m4trans[12]=x;_m4trans[13]=y;_m4trans[14]=z;
+    _m4trans[0]=_m4trans[5]=_m4trans[10]=_m4trans[15]=1;
+    _m4trans[1]=_m4trans[2]=_m4trans[3]=_m4trans[4]=_m4trans[6]=_m4trans[7]=_m4trans[8]=_m4trans[9]=_m4trans[11]=0;
+    return M4.mul(o,m,_m4trans);
   },
   scale:(o,m,sx,sy,sz)=>{
-    const s=new Float32Array([sx,0,0,0,0,sy,0,0,0,0,sz,0,0,0,0,1]);return M4.mul(o,m,s);
+    _m4scale[0]=sx;_m4scale[5]=sy;_m4scale[10]=sz;_m4scale[15]=1;
+    _m4scale[1]=_m4scale[2]=_m4scale[3]=_m4scale[4]=_m4scale[6]=_m4scale[7]=_m4scale[8]=_m4scale[9]=_m4scale[11]=_m4scale[12]=_m4scale[13]=_m4scale[14]=0;
+    return M4.mul(o,m,_m4scale);
   },
   perspective:(o,fov,asp,near,far)=>{
     const f=1/Math.tan(fov*0.5),nf=1/(near-far);
@@ -623,14 +634,12 @@ function onMouseM(e){
 // WEAPONS
 // ============================================================
 function getLookDir(){
-  const fwd=[0,0,1];
-  // Combine yaw quaternion and pitch
-  const pq=[0,0,0,1];
+  // Combine yaw quaternion and pitch (reuse temp buffers)
+  const fwd=_t0,pq=_t1,full=_t2;
   Q.fromAxisAngle(pq,[1,0,0],player.pitch);
-  const full=[0,0,0,1];
   Q.mul(full,player.yawQ,pq);
   Q.rotVec(fwd,full,fwd);
-  return fwd;
+  return V.copy(fwd);
 }
 
 function firePistol(){
@@ -1117,11 +1126,9 @@ function render(){
     cp[1]+=(Math.random()-0.5)*shakeI*2;
   }
 
-  // Camera direction from yaw quaternion + pitch
-  const fwd=[0,0,1];
-  const pq=[0,0,0,1];
+  // Camera direction from yaw quaternion + pitch (reuse temp buffers)
+  const fwd=_t0,pq=_t1,full=_t2;
   Q.fromAxisAngle(pq,[1,0,0],player.pitch);
-  const full=[0,0,0,1];
   Q.mul(full,player.yawQ,pq);
   Q.rotVec(fwd,full,fwd);
 
@@ -1132,9 +1139,9 @@ function render(){
   M4.perspective(projMat,currentFOV,asp,0.1,500);
   M4.mul(vpMat,projMat,viewMat);
 
-  // Platforms
+  // Platforms (reuse mdlMat/mvpMat — no allocation)
   for(const p of level.plats){
-    mdlMat=M4.id();
+    M4.id(mdlMat);
     M4.translate(mdlMat,mdlMat,p.pos[0],p.pos[1],p.pos[2]);
     M4.scale(mdlMat,mdlMat,p.size[0],p.size[1],p.size[2]);
     M4.mul(mvpMat,vpMat,mdlMat);
@@ -1145,22 +1152,22 @@ function render(){
   for(const e of enemies){
     if(!e.alive)continue;
     // Body
-    mdlMat=M4.id();
+    M4.id(mdlMat);
     M4.translate(mdlMat,mdlMat,e.pos[0],e.pos[1]-e.hgt*0.15,e.pos[2]);
     M4.scale(mdlMat,mdlMat,e.rad*2,e.hgt*0.65,e.rad*2);
     M4.mul(mvpMat,vpMat,mdlMat);
     renderer.draw(mdlMat,mvpMat,e.col,0,cp);
     // Head (glowing)
-    mdlMat=M4.id();
+    M4.id(mdlMat);
     M4.translate(mdlMat,mdlMat,e.pos[0],e.pos[1]+e.hgt*0.35,e.pos[2]);
     M4.scale(mdlMat,mdlMat,e.rad*1.5,e.headH*0.45,e.rad*1.5);
     M4.mul(mvpMat,vpMat,mdlMat);
     renderer.draw(mdlMat,mvpMat,e.hcol,0.35,cp);
   }
 
-  // Projectiles
+  // Projectiles (reuse mdlMat/mvpMat)
   for(const p of projs.active){
-    mdlMat=M4.id();
+    M4.id(mdlMat);
     M4.translate(mdlMat,mdlMat,p.pos[0],p.pos[1],p.pos[2]);
     const s=p.rad*2;
     M4.scale(mdlMat,mdlMat,s,s,s);
@@ -1168,7 +1175,7 @@ function render(){
     renderer.draw(mdlMat,mvpMat,p.col,p.emit,cp);
   }
   for(const p of eProjs.active){
-    mdlMat=M4.id();
+    M4.id(mdlMat);
     M4.translate(mdlMat,mdlMat,p.pos[0],p.pos[1],p.pos[2]);
     const s=p.rad*2;
     M4.scale(mdlMat,mdlMat,s,s,s);
@@ -1176,10 +1183,10 @@ function render(){
     renderer.draw(mdlMat,mvpMat,p.col,p.emit,cp);
   }
 
-  // Particles
+  // Particles (reuse mdlMat/mvpMat)
   for(const p of parts.active){
     const a=Math.max(0,p.life/p.maxL);
-    mdlMat=M4.id();
+    M4.id(mdlMat);
     M4.translate(mdlMat,mdlMat,p.pos[0],p.pos[1],p.pos[2]);
     const s=p.sz*a;
     M4.scale(mdlMat,mdlMat,s,s,s);
@@ -1188,12 +1195,12 @@ function render(){
     renderer.draw(mdlMat,mvpMat,c,0.5,cp);
   }
 
-  // Stars
+  // Stars (reuse mdlMat/mvpMat — no per-star allocation)
   const t=performance.now()*0.001;
   for(const s of stars){
     const tw=0.5+0.5*Math.sin(t*s.tw+s.ph);
     const b=s.b*tw;
-    mdlMat=M4.id();
+    M4.id(mdlMat);
     M4.translate(mdlMat,mdlMat,s.x,s.y,s.z);
     const sz=s.sz;
     M4.scale(mdlMat,mdlMat,sz,sz,sz);
@@ -1247,11 +1254,9 @@ function renderMinimap(){
   ctx.strokeStyle='#ffffff';ctx.lineWidth=1;
   ctx.beginPath();ctx.arc(cx,cy,3.5,0,6.283);ctx.stroke();
 
-  // Direction
-  const fwd=[0,0,1];
-  const pq=[0,0,0,1];
+  // Direction (reuse temp buffers)
+  const fwd=_t0,pq=_t1,full=_t2;
   Q.fromAxisAngle(pq,[1,0,0],player.pitch);
-  const full=[0,0,0,1];
   Q.mul(full,player.yawQ,pq);
   Q.rotVec(fwd,full,fwd);
   ctx.strokeStyle='#00ff44';ctx.lineWidth=2;
